@@ -188,9 +188,6 @@ Project Link: [https://github.com/danx123/macan-bubble-shooter](https://github.c
 - The bubble shooter game genre pioneers
 - All contributors and testers
 
-## 📸 Screenshots
-
-*Add screenshots of your game here*
 
 ---
 
