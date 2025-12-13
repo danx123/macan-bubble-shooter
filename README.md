@@ -115,7 +115,25 @@ macan-bubble-shooter/
 - **State Management**: Comprehensive game state tracking
 
 ## 📸 Screenshot
-<img width="1365" height="767" alt="Screenshot 2025-12-10 125010" src="https://github.com/user-attachments/assets/99bdda04-86cc-4ff8-aa65-a0c85658594f" />
+<img width="1365" height="767" alt="Screenshot 2025-12-13 220853" src="https://github.com/user-attachments/assets/ea8df622-a89d-4a57-afdf-c17b3b29272e" />
+<img width="1365" height="767" alt="Screenshot 2025-12-13 220905" src="https://github.com/user-attachments/assets/047687b1-d202-4742-a0b4-55c9235af1ea" />
+
+## 📝 Changelog v3.0.0
+- Added Welcome Screen (Nebula Theme)
+- Added Dynamic Background (Welcome Screen)
+- Added Dynamic Background (Game Scene)
+- Added Custom Cursor
+- Redesign UI (HUD Layout, Game Over Screen)
+- Added Skill/PowerUp:
+  * Bomb
+  * Rainbow
+  * Laser
+  * Fireball
+  * Freeze
+- Added new physics logic
+- Added new effect
+
+
 
 
 ## 🔧 Customization
