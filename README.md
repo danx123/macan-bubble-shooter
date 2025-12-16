@@ -120,11 +120,9 @@ macan-bubble-shooter/
 
 
 
-## 📝 Changelog v3.5.0
-- Added Dynamic Background (Nebula Theme, GameScene)
-- Added Meteor Tail when shoot
-- Added aiming function
-- Fixed Welcome Screen Stylesheet
+## 📝 Changelog v3.7.0
+- Added Caching System
+- Optimize Code
 
 
 ## 🔧 Customization
