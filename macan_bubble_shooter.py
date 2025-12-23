@@ -8,12 +8,13 @@ from pathlib import Path
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QPushButton, 
                                QLabel, QVBoxLayout, QHBoxLayout, QGraphicsView, 
                                QGraphicsScene, QGraphicsEllipseItem, QGraphicsPolygonItem,
-                               QGraphicsRectItem, QDialog, QGraphicsDropShadowEffect, QStackedWidget, QCheckBox, QFrame, QGridLayout, QGraphicsTextItem)
+                               QGraphicsRectItem, QDialog, QGraphicsDropShadowEffect, QStackedWidget, QCheckBox, QFrame, QGridLayout, QGraphicsTextItem, QGraphicsLineItem)
 from PySide6.QtCore import (Qt, QTimer, QPointF, QRectF, QPropertyAnimation, 
                             Signal, QObject, QEasingCurve, QVariantAnimation)
 from PySide6.QtGui import (QColor, QPen, QBrush, QLinearGradient, QRadialGradient, 
-                          QPainter, QPolygonF, QFont, QPainterPath, QIcon, QPalette)
+                          QPainter, QPolygonF, QFont, QPainterPath, QIcon, QPalette, QPixmap)
 from bubble_fx import get_sound_manager, play_shoot, play_burst, play_clear, play_combo, start_bgm
+from PySide6.QtMultimedia import QMediaPlayer
 from bubble_power import (get_power_manager, PowerUpType, PowerUpBubble, 
                           PowerUpVisualEffect, try_spawn_powerup, 
                           add_powerup, use_powerup, get_all_powers_info)
@@ -22,8 +23,8 @@ from bubble_gfx import get_bubble_pixmap, get_launcher_pixmap, get_background_pi
 # --- Game Configuration ---
 BUBBLE_RADIUS = 22
 ROWS = 14
-COLS = 14
-SHOTS_PER_DROP = 6  # CONFIG: Langit-langit turun setiap 6 tembakan (kena/tidak)
+COLS = 20  # FIXED: Tambah kolom agar memenuhi layar (1200px)
+SHOTS_PER_DROP = 7  # CONFIG: Langit-langit turun setiap 7 tembakan (kena/tidak)
 
 # Warna Palet Premium
 BUBBLE_PALETTE = [
@@ -82,25 +83,21 @@ class Bubble(QObject, QGraphicsEllipseItem):
         self.row = 0
         self.col = 0
         self.setTransformOriginPoint(0, 0)
-        self.anim = None # Simpan referensi animasi agar tidak di-garbage collect
+        self.anim = None
         
     def setup_appearance(self):
-        # === HANDLE RAINBOW BUBBLE (color_index = -1) ===
         if self.color_index == -1:
-            # Buat gradien pelangi untuk rainbow bubble
             gradient = QRadialGradient(-self.radius_val * 0.3, -self.radius_val * 0.3, self.radius_val * 1.5)
-            # Warna pelangi (Rainbow gradient)
-            gradient.setColorAt(0, QColor(255, 255, 255))    # Putih terang di tengah
-            gradient.setColorAt(0.2, QColor(255, 0, 0))      # Merah
-            gradient.setColorAt(0.4, QColor(255, 255, 0))    # Kuning
-            gradient.setColorAt(0.6, QColor(0, 255, 0))      # Hijau
-            gradient.setColorAt(0.8, QColor(0, 0, 255))      # Biru
-            gradient.setColorAt(1, QColor(255, 0, 255))      # Magenta
+            gradient.setColorAt(0, QColor(255, 255, 255))
+            gradient.setColorAt(0.2, QColor(255, 0, 0))
+            gradient.setColorAt(0.4, QColor(255, 255, 0))
+            gradient.setColorAt(0.6, QColor(0, 255, 0))
+            gradient.setColorAt(0.8, QColor(0, 0, 255))
+            gradient.setColorAt(1, QColor(255, 0, 255))
             
             self.setBrush(QBrush(gradient))
-            self.setPen(QPen(QColor(255, 255, 255), 3))  # Border putih tebal
+            self.setPen(QPen(QColor(255, 255, 255), 3))
             
-            # Tambahkan emoji/icon rainbow
             rainbow_text = QGraphicsTextItem("🌈", self)
             rainbow_text.setDefaultTextColor(Qt.white)
             font = QFont("Segoe UI Emoji", int(self.radius_val * 0.8), QFont.Bold)
@@ -109,7 +106,6 @@ class Bubble(QObject, QGraphicsEllipseItem):
             rainbow_text.setPos(-text_rect.width()/2, -text_rect.height()/2)
             return
         
-        # === LOGIC NORMAL (warna biasa) ===
         if self.color_index >= len(BUBBLE_PALETTE): 
             self.color_index = 0
         
@@ -124,15 +120,14 @@ class Bubble(QObject, QGraphicsEllipseItem):
         self.setPen(QPen(palette["dark"].darker(150), 1.5))
 
     def move_to_grid_pos(self, x, y):
-        # PERBAIKAN: Menggunakan QVariantAnimation agar animasi pos lebih stabil di semua versi PySide
         if self.anim:
             self.anim.stop()
             
         self.anim = QVariantAnimation()
         self.anim.setStartValue(self.pos())
         self.anim.setEndValue(QPointF(x, y))
-        self.anim.setDuration(500) # Durasi animasi 0.5 detik
-        self.anim.setEasingCurve(QEasingCurve.OutBounce) # Efek memantul sedikit saat turun
+        self.anim.setDuration(500)
+        self.anim.setEasingCurve(QEasingCurve.OutBounce)
         self.anim.valueChanged.connect(self.setPos)
         self.anim.start()
 
@@ -177,9 +172,7 @@ class Shooter(QGraphicsPolygonItem):
         self.setRotation(-self.angle + 90)
 
     def update_loaded_bubble_visual(self):
-        # === HANDLE RAINBOW ===
         if self.current_color == -1:
-            # Gradien pelangi
             gradient = QRadialGradient(-5, -5, BUBBLE_RADIUS)
             gradient.setColorAt(0, QColor(255, 255, 255))
             gradient.setColorAt(0.2, QColor(255, 0, 0))
@@ -192,7 +185,6 @@ class Shooter(QGraphicsPolygonItem):
             self.loaded_bubble_item.setPen(QPen(QColor(255, 255, 255), 2))
             return
         
-        # === LOGIC NORMAL ===
         palette = BUBBLE_PALETTE[self.current_color]
         gradient = QRadialGradient(-5, -5, BUBBLE_RADIUS)
         gradient.setColorAt(0, palette["light"])
@@ -220,7 +212,6 @@ class BubbleGrid:
             row_bubbles = []
             for col in range(COLS):
                 if row < initial_rows:
-                    # Indentasi hex yang benar
                     is_indented = (row % 2 == 1)
                     if is_indented and col == COLS - 1:
                         row_bubbles.append(None)
@@ -257,9 +248,9 @@ class GameScene(QGraphicsScene):
     drop_counter_changed = Signal(int)
     level_changed = Signal(int)
     next_bubble_changed = Signal(int)
-    power_collected = Signal(str)  # Emit saat dapat power
-    power_used = Signal(str)        # Emit saat gunakan power
-    power_updated = Signal()        # Emit saat ada perubahan power status
+    power_collected = Signal(str)
+    power_used = Signal(str)
+    power_updated = Signal()
     game_over = Signal()
     
     def __init__(self):
@@ -268,14 +259,12 @@ class GameScene(QGraphicsScene):
         self.scene_height = 800        
         self.setSceneRect(0, 0, self.scene_width, self.scene_height)
         
-        # --- PERBAIKAN DI SINI (Pindahkan Variabel ke Atas) ---
         self.score = 0
         self.high_score = 0
-        self.level = 1  # Variabel ini harus ada sebelum setup_background dipanggil
+        self.level = 1
         self.level_threshold = 1000
-        # ------------------------------------------------------
 
-        self.setup_background() # Sekarang aman dipanggil karena self.level sudah ada
+        self.setup_background()
         
         self.grid = BubbleGrid()
         self.bubbles = []
@@ -286,9 +275,6 @@ class GameScene(QGraphicsScene):
         self.flying_bubble = None
         self.particles = []
         
-        # (Baris inisialisasi score/level yang lama di sini sudah dipindah ke atas)
-        
-        # LOGIKA BARU: Drop setiap X tembakan
         self.shots_until_drop = SHOTS_PER_DROP 
         
         self.shooting = False
@@ -299,45 +285,84 @@ class GameScene(QGraphicsScene):
         
         self.create_bubbles_visuals()    
 
-        # Power Up
         self.power_manager = get_power_manager()
-        self.active_power = None  # Power yang sedang aktif
-        self.freeze_shots_remaining = 0  # Untuk freeze power
+        self.active_power = None
+        self.freeze_shots_remaining = 0
         
+        # === AIM LINE (Garis Aim) ===
+        self.aim_line = None
+        self.aim_bounce_line = None
+    
     def setup_background(self):
-        self.bg_rect = QGraphicsRectItem(0, 0, self.scene_width, self.scene_height)
-        self.bg_rect.setPen(Qt.NoPen)
-        self.bg_rect.setZValue(-100)
-        self.addItem(self.bg_rect)
+        # 1. Hapus background lama jika ada (untuk reset)
+        if hasattr(self, 'bg_item') and self.bg_item:
+            self.removeItem(self.bg_item)
+            self.bg_item = None
+
+        # 2. Tentukan Path Gambar Wallpaper
+        bg_path = Path(__file__).parent / "ui" / "bubble_scn.webp"
+        final_pixmap = None
+
+        # 3. Coba Load Gambar Wallpaper
+        if bg_path.exists():
+            original_pixmap = QPixmap(str(bg_path))
+            if not original_pixmap.isNull():
+                # Scale gambar agar memenuhi seluruh Scene (1200x800)
+                # Menggunakan IgnoreAspectRatio agar gambar ditarik penuh (stretch)
+                final_pixmap = original_pixmap.scaled(
+                    self.scene_width, 
+                    self.scene_height,
+                    Qt.IgnoreAspectRatio, 
+                    Qt.SmoothTransformation
+                )
+
+        # 4. Fallback: Jika gambar tidak ada, pakai Generator Nebula (lama)
+        if not final_pixmap:
+            final_pixmap = get_background_pixmap(self.scene_width, self.scene_height)
+
+        # 5. Tambahkan ke Scene
+        if final_pixmap:
+            self.bg_item = self.addPixmap(final_pixmap)
+            self.bg_item.setZValue(-100) # Layer paling belakang
+            self.bg_item.setPos(0, 0)
+        else:
+            # Fallback terakhir (Layar Hitam) jika semua gagal
+            self.bg_item = QGraphicsRectItem(0, 0, self.scene_width, self.scene_height)
+            self.bg_item.setBrush(QBrush(Qt.black))
+            self.bg_item.setZValue(-100)
+            self.addItem(self.bg_item)
+
+        # 6. Overlay Layer (Tetap dipertahankan untuk efek Level Tint)        
+        if hasattr(self, 'bg_overlay') and self.bg_overlay:
+            self.removeItem(self.bg_overlay)
+            
+        self.bg_overlay = QGraphicsRectItem(0, 0, self.scene_width, self.scene_height)
+        self.bg_overlay.setPen(Qt.NoPen)
+        self.bg_overlay.setZValue(-99) # Di atas wallpaper, di bawah bubble
+        self.addItem(self.bg_overlay)
+        
+        # Terapkan warna awal
         self.update_background_color()
     
     def update_background_color(self):
-        """Update warna background berdasarkan level"""
-        # Palette warna background untuk setiap level
-        bg_colors = [
-            # Level 1: Dark Green
-            [(10, 30, 20), (5, 20, 15), (0, 10, 5)],
-            # Level 2: Dark Blue
-            [(10, 20, 40), (5, 15, 30), (0, 5, 20)],
-            # Level 3: Dark Purple
-            [(30, 10, 40), (20, 5, 30), (10, 0, 20)],
-            # Level 4: Dark Red
-            [(40, 10, 10), (30, 5, 5), (20, 0, 0)],
-            # Level 5: Dark Orange
-            [(40, 25, 10), (30, 15, 5), (20, 10, 0)],
-            # Level 6+: Dark Teal (cycle)
-            [(10, 40, 40), (5, 30, 30), (0, 20, 20)]
-        ]
-        
-        # Pilih palet berdasarkan level (cycle jika lebih dari 6)
-        color_idx = min(self.level - 1, len(bg_colors) - 1)
-        colors = bg_colors[color_idx]
-        
-        gradient = QLinearGradient(0, 0, 0, self.scene_height)
-        gradient.setColorAt(0, QColor(*colors[0]))
-        gradient.setColorAt(0.5, QColor(*colors[1]))
-        gradient.setColorAt(1, QColor(*colors[2]))
-        self.bg_rect.setBrush(QBrush(gradient))
+        # Format: (R, G, B, Alpha) 
+        # Alpha 100 sebelumnya cukup pekat. Ubah ke 60-80 agar wallpaper lebih terlihat.
+        tints = [
+            QColor(0, 0, 0, 0),       # Level 1: Original (Jernih)
+            QColor(50, 0, 20, 60),    # Level 2: Sedikit Merah
+            QColor(0, 40, 60, 60),    # Level 3: Sedikit Biru
+            QColor(40, 0, 60, 60),    # Level 4: Sedikit Ungu
+            QColor(60, 40, 0, 60),    # Level 5: Sedikit Emas
+            QColor(0, 60, 20, 60)     # Level 6: Sedikit Hijau
+        ]      
+                
+        # Ambil warna berdasarkan level (looping jika level > 6)
+        tint_color = tints[(self.level - 1) % len(tints)]
+        self.bg_overlay.setBrush(QBrush(tint_color))
+
+        # Pastikan border tetap mati saat update warna
+        self.bg_overlay.setPen(Qt.NoPen)
+        self.bg_overlay.setBrush(QBrush(tint_color))
             
     def create_bubbles_visuals(self):
         for bubble in self.bubbles:
@@ -376,6 +401,9 @@ class GameScene(QGraphicsScene):
         
         self.shooter.reload()
         self.next_bubble_changed.emit(self.shooter.next_color)
+        
+        # Hapus aim line saat menembak
+        self.clear_aim_line()
 
     def swap_shooter_bubble(self):
         if not self.shooting and not self.flying_bubble:
@@ -383,27 +411,59 @@ class GameScene(QGraphicsScene):
             self.next_bubble_changed.emit(self.shooter.next_color)
         
     def update_game(self):
+        # 1. Update semua partikel yang ada (hapus jika sudah mati)
         self.particles = [p for p in self.particles if p.update_particle()]
         
+        # 2. Logika Bubble Terbang
         if self.flying_bubble:
+            # === START: EFEK METEOR (TRAIL) ===
+            # Membuat partikel jejak di setiap frame
+            # Warna putih transparan (seperti asap/ekor komet)
+            trail_color = QColor(255, 255, 255, 150) 
+            
+            # Spawn partikel di posisi bubble saat ini
+            p = Particle(self.flying_bubble.x(), self.flying_bubble.y(), trail_color, self)
+            
+            # Kustomisasi partikel agar terlihat seperti jejak
+            p.setZValue(self.flying_bubble.zValue() - 1)  # Render di belakang bubble
+            p.setScale(0.5)        # Ukuran lebih kecil dari ledakan biasa
+            p.life = 10            # Umur sangat pendek (cepat hilang)
+            p.max_life = 10
+            
+            # Gerakan acak sangat kecil agar terlihat seperti asap buangan
+            p.vx = random.uniform(-1.5, 1.5)
+            p.vy = random.uniform(-1.5, 1.5)
+            
+            self.particles.append(p)
+            # === END: EFEK METEOR ===
+
+            # 3. Hitung posisi baru
             new_x = self.flying_bubble.x() + self.bubble_vx
             new_y = self.flying_bubble.y() + self.bubble_vy
             
-            if new_x - BUBBLE_RADIUS < 0 or new_x + BUBBLE_RADIUS > self.scene_width:
-                self.bubble_vx *= -1
-                new_x = self.flying_bubble.x() + self.bubble_vx
+            # 4. Pantulan Dinding (Wall Bounce)
+            if new_x - BUBBLE_RADIUS <= 0:
+                self.bubble_vx = abs(self.bubble_vx)  # Pantul ke kanan
+                new_x = BUBBLE_RADIUS
+            elif new_x + BUBBLE_RADIUS >= self.scene_width:
+                self.bubble_vx = -abs(self.bubble_vx)  # Pantul ke kiri
+                new_x = self.scene_width - BUBBLE_RADIUS
                 
             self.flying_bubble.setPos(new_x, new_y)
             
+            # 5. Cek Tabrakan dengan Langit-langit (Ceiling)
             if new_y - BUBBLE_RADIUS < 0:
                 self.attach_bubble()
                 return
 
+            # 6. Cek Tabrakan dengan Bubble Lain
             for bubble in self.bubbles:
+                # Optimasi: Cek selisih Y dulu biar cepat
                 if abs(bubble.y() - new_y) < BUBBLE_RADIUS * 2.5:
                     dx = new_x - bubble.x()
                     dy = new_y - bubble.y()
                     dist_sq = dx*dx + dy*dy
+                    # Jarak toleransi tabrakan (1.8 * radius)
                     if dist_sq < (BUBBLE_RADIUS * 1.8) ** 2:
                         self.attach_bubble()
                         return
@@ -443,101 +503,72 @@ class GameScene(QGraphicsScene):
         
         self.flying_bubble = None
 
-        # === TAMBAHAN BARU: HANDLE RAINBOW ===
-        # Jika bubble yang ditembak adalah rainbow (-1), ubah jadi warna mayoritas tetangga
         if self.grid.grid[best_row][best_col] == -1:
-            # Hitung warna tetangga terbanyak
             neighbors = self.grid.get_neighbors(best_row, best_col)
             color_counts = {}
             
             for nr, nc in neighbors:
                 neighbor_color = self.grid.grid[nr][nc]
-                if neighbor_color is not None and neighbor_color != -1:  # Ignore rainbow
+                if neighbor_color is not None and neighbor_color != -1:
                     color_counts[neighbor_color] = color_counts.get(neighbor_color, 0) + 1
             
-            # Pilih warna mayoritas
             if color_counts:
                 most_common_color = max(color_counts, key=color_counts.get)
                 self.grid.grid[best_row][best_col] = most_common_color
                 
-                # Update visual bubble
                 for bubble in self.bubbles:
                     if bubble.row == best_row and bubble.col == best_col:
                         bubble.color_index = most_common_color
                         bubble.setup_appearance()
                         break
-        # === END RAINBOW HANDLING ===
 
-        # === MODIFIKASI: Handle Power Effects ===
         if self.active_power == PowerUpType.BOMB:
-        # Ledakkan area 3x3
             self.apply_bomb_effect(best_row, best_col)
             self.active_power = None
         
         elif self.active_power == PowerUpType.LASER:
-            # Hancurkan 1 kolom
             self.apply_laser_effect(best_col)
             self.active_power = None
         
         elif self.active_power == PowerUpType.FIREBALL:
-        # Ledakan besar
             self.apply_fireball_effect(best_row, best_col)
             self.active_power = None
     
         else:
-            # Logic normal
             match_found = self.check_matches(best_row, best_col)
             if not match_found:
                 self.check_and_drop_neighbors(best_row, best_col)
     
-        # === UPDATE COOLDOWN ===
         self.power_manager.update_all_cooldowns()
         self.power_updated.emit()
     
-        # Kurangi counter DROP (kecuali jika freeze aktif)
         if self.freeze_shots_remaining > 0:
             self.freeze_shots_remaining -= 1
-            # Update UI Drop Counter (opsional: biar user tau lagi freeze)
-            # self.drop_counter_changed.emit(self.shots_until_drop) 
         else:
             self.shots_until_drop -= 1
             self.drop_counter_changed.emit(self.shots_until_drop)
             
-            # Jika counter habis, turunkan langit-langit
             if self.shots_until_drop <= 0:
                 QTimer.singleShot(100, self.add_ceiling_row)
                 self.shots_until_drop = SHOTS_PER_DROP
                 self.drop_counter_changed.emit(self.shots_until_drop)       
         
-        # Cek Matches dulu
         match_found = self.check_matches(best_row, best_col)
         
-        # LOGIC BARU: Jika tidak ada match 3+, cek apakah ada bubble yang bisa jatuh
         if not match_found:
             self.check_and_drop_neighbors(best_row, best_col)
         
-        # Kurangi counter setiap kali tembak
-        #self.shots_until_drop -= 1
-        #self.drop_counter_changed.emit(self.shots_until_drop)
-        
-        # Jika counter habis, turunkan langit-langit
         if self.shots_until_drop <= 0:
             QTimer.singleShot(100, self.add_ceiling_row)
             self.shots_until_drop = SHOTS_PER_DROP
             self.drop_counter_changed.emit(self.shots_until_drop)
 
-        # Cek Game Over
         if self.check_game_over_condition():
             self.game_over.emit()
 
-        # === PERBAIKAN UTAMA DI SINI ===
-        # Reset flag shooting agar pemain bisa menembak lagi
         self.shooting = False 
-        # ===============================
 
-    # --- TAMBAHKAN FUNGSI HELPER BARU ---
     def apply_bomb_effect(self, center_row, center_col):
-        """Ledakkan area 3x3 di sekitar center"""
         destroyed = []
 
         for dr in range(-1, 2):
@@ -549,9 +580,7 @@ class GameScene(QGraphicsScene):
                         self.grid.grid[r][c] = None
                         self.remove_bubble_visual(r, c)
 
-        # Visual effect
         x, y = self.grid.get_position(center_row, center_col)
-        # Pastikan PowerUpVisualEffect sudah di-import
         PowerUpVisualEffect.create_explosion_effect(
             self, x, y, BUBBLE_RADIUS * 3, QColor(255, 69, 0)
         )
@@ -561,16 +590,13 @@ class GameScene(QGraphicsScene):
         self.remove_floating_bubbles()
 
     def apply_laser_effect(self, col):
-        """Hancurkan semua bubble di kolom"""
         destroyed = []
         for row in range(len(self.grid.grid)):
-            # Cek range agar tidak error index out of bound
             if col < len(self.grid.grid[row]) and self.grid.grid[row][col] is not None:
                 destroyed.append((row, col))
                 self.grid.grid[row][col] = None
                 self.remove_bubble_visual(row, col)
 
-        # Visual effect
         x, _ = self.grid.get_position(0, col)
         PowerUpVisualEffect.create_laser_effect(
             self, x, 0, self.scene_height - 200, QColor(0, 255, 255)
@@ -581,7 +607,6 @@ class GameScene(QGraphicsScene):
         self.remove_floating_bubbles()
 
     def apply_fireball_effect(self, center_row, center_col):
-        """Ledakan besar 5x5"""
         destroyed = []
 
         for dr in range(-2, 3):
@@ -593,7 +618,6 @@ class GameScene(QGraphicsScene):
                         self.grid.grid[r][c] = None
                         self.remove_bubble_visual(r, c)
 
-        # Visual effect
         x, y = self.grid.get_position(center_row, center_col)
         PowerUpVisualEffect.create_explosion_effect(
             self, x, y, BUBBLE_RADIUS * 5, QColor(255, 140, 0)
@@ -603,14 +627,12 @@ class GameScene(QGraphicsScene):
         play_combo()
         self.remove_floating_bubbles()
 
-
     def add_score(self, points):
         self.score += points
         if self.score > self.high_score:
             self.high_score = self.score
-            self.high_score_changed.emit(self.high_score) # Update UI real-time
+            self.high_score_changed.emit(self.high_score)
         self.score_changed.emit(self.score)
-    # ------------------------------------
 
     def check_matches(self, row, col):
         color = self.grid.grid[row][col]
@@ -622,13 +644,11 @@ class GameScene(QGraphicsScene):
             if len(matched) >= 6:
                 play_combo()
 
-                # === TAMBAHAN BARU: Try spawn power-up ===
             power_type = try_spawn_powerup(len(matched))
             if power_type:
                 add_powerup(power_type)
-                # Emit signal untuk update UI (akan dibuat nanti)
-                self.power_collected.emit(power_type)  # Tambahkan signal ini
-            # =========================================
+                self.power_collected.emit(power_type)
+            
             points = len(matched) * 10 + (self.level * 5)
             self.add_score(points)
             self.score_changed.emit(self.score)
@@ -653,38 +673,30 @@ class GameScene(QGraphicsScene):
                 break
 
     def add_ceiling_row(self):
-        # 1. Cek Game Over sebelum geser
         if any(c is not None for c in self.grid.grid[ROWS-1]):
             self.game_over.emit()
             return
 
-        # 2. Geser Logic Grid
         self.grid.grid.pop() 
         new_row = []
         for col in range(COLS):
-            # Cek indentasi baris paling atas (akan jadi baris genap/ganjil)
-            # Karena insert di 0, dia jadi baris 0 (genap)
             if col < COLS: 
                 new_row.append(random.randint(0, len(BUBBLE_PALETTE) - 1))
             else:
                 new_row.append(None)
         self.grid.grid.insert(0, new_row)
 
-        # 3. Update Visual Bubble yang sudah ada (Geser Turun)
         for bubble in self.bubbles:
             bubble.row += 1
             new_x, new_y = self.grid.get_position(bubble.row, bubble.col)
-            # Panggil animasi turun
             bubble.move_to_grid_pos(new_x, new_y)
             
-        # 4. Buat Visual untuk Baris Baru
         for col in range(len(new_row)):
             if new_row[col] is not None:
                 x, y = self.grid.get_position(0, col)
                 bubble = Bubble(new_row[col], x, y)
                 bubble.row = 0
                 bubble.col = col
-                # Mulai dari atas layar sedikit agar terlihat masuk
                 bubble.setPos(x, y - BUBBLE_RADIUS*2)
                 bubble.move_to_grid_pos(x, y)
                 self.bubbles.append(bubble)
@@ -694,7 +706,6 @@ class GameScene(QGraphicsScene):
         if self.score >= self.level_threshold * self.level:
             self.level += 1
             self.level_changed.emit(self.level)
-            # Update background color saat naik level
             self.update_background_color()
 
     def find_matching(self, row, col, color, matched):
@@ -703,16 +714,12 @@ class GameScene(QGraphicsScene):
         
         cell_color = self.grid.grid[row][col]
         
-        # Bubble tidak ada
         if cell_color is None:
             return
         
-        # === HANDLE RAINBOW: Rainbow cocok dengan warna apapun ===
-        # Jika target adalah rainbow ATAU cell adalah rainbow, anggap match
         if cell_color == color or cell_color == -1 or color == -1:
             matched.add((row, col))
             
-            # Lanjutkan rekursi dengan warna asli (bukan rainbow)
             search_color = color if color != -1 else cell_color
             for nr, nc in self.grid.get_neighbors(row, col):
                 self.find_matching(nr, nc, search_color, matched)
@@ -732,32 +739,22 @@ class GameScene(QGraphicsScene):
                     self.add_score(20)
                     dropped_count += 1
         
-        # Bonus untuk menjatuhkan banyak bubble sekaligus
         if dropped_count >= 3:
             play_combo()
             
         self.score_changed.emit(self.score)
     
     def check_and_drop_neighbors(self, impact_row, impact_col):
-        """
-        Cek bubble tetangga yang bisa jatuh karena kehilangan support.
-        Logic: Bubble jatuh jika tidak ada koneksi ke langit-langit (baris 0)
-        """
-        # Dapatkan semua tetangga dari bubble yang baru menempel
         neighbors = self.grid.get_neighbors(impact_row, impact_col)
         
-        # Untuk setiap tetangga, cek apakah masih connected ke langit-langit
         for nr, nc in neighbors:
             if self.grid.grid[nr][nc] is not None:
-                # Cek apakah bubble ini masih connected ke top
                 connected = set()
                 for col in range(len(self.grid.grid[0])):
                     if self.grid.grid[0][col] is not None:
                         self.find_connected(0, col, connected)
                 
-                # Jika bubble tetangga tidak connected, jatuhkan
                 if (nr, nc) not in connected:
-                    # Jatuhkan bubble ini dan semua yang connected dengannya
                     to_drop = set()
                     self.find_connected_cluster(nr, nc, to_drop)
                     
@@ -773,10 +770,6 @@ class GameScene(QGraphicsScene):
                     self.score_changed.emit(self.score)
     
     def find_connected_cluster(self, row, col, cluster):
-        """
-        Temukan semua bubble yang connected dengan bubble di (row, col)
-        Berbeda dengan find_connected, ini tidak peduli dengan langit-langit
-        """
         if (row, col) in cluster:
             return
         if self.grid.grid[row][col] is None:
@@ -800,9 +793,8 @@ class GameScene(QGraphicsScene):
             self.particles.append(particle)
 
     def activate_power(self, power_type):
-        """Aktifkan power-up tertentu"""
         if not use_powerup(power_type):
-            return False  # Tidak bisa digunakan
+            return False
 
         self.active_power = power_type
         self.power_used.emit(power_type)
@@ -813,14 +805,11 @@ class GameScene(QGraphicsScene):
             play_combo()
 
         elif power_type == PowerUpType.RAINBOW:
-            # Set bubble berikutnya jadi rainbow
             self.shooter.current_color = -1
             self.shooter.update_loaded_bubble_visual()
-            # Reset active power karena rainbow langsung diload
             self.active_power = None
-            play_combo()  # Sound effect
+            play_combo()
 
-        # Power lain akan diproses saat tembak
         return True
             
     def check_game_over_condition(self):
@@ -845,12 +834,102 @@ class GameScene(QGraphicsScene):
         self.score_changed.emit(self.score)
         self.drop_counter_changed.emit(self.shots_until_drop)
         self.level_changed.emit(self.level)
-        # Reset background color ke level 1
         self.update_background_color()
+        self.clear_aim_line()
+    
+    # === AIM ASSIST METHODS ===
+    def update_aim_line(self, angle):
+        """Update garis aim dengan pantulan"""
+        self.clear_aim_line()
+        
+        if self.shooting or self.flying_bubble:
+            return
+        
+        rad = math.radians(angle)
+        start_dist = 40
+        start_x = self.shooter.x() + math.cos(rad) * start_dist
+        start_y = self.shooter.y() - math.sin(rad) * start_dist
+        
+        dx = math.cos(rad)
+        dy = -math.sin(rad)
+        
+        max_distance = 1000
+        step = 5
+        
+        points = [(start_x, start_y)]
+        current_x, current_y = start_x, start_y
+        current_dx, current_dy = dx, dy
+        bounced = False
+        
+        for _ in range(int(max_distance / step)):
+            next_x = current_x + current_dx * step
+            next_y = current_y + current_dy * step
+            
+            if next_x - BUBBLE_RADIUS <= 0:
+                next_x = BUBBLE_RADIUS
+                current_dx = abs(current_dx)
+                bounced = True
+            elif next_x + BUBBLE_RADIUS >= self.scene_width:
+                next_x = self.scene_width - BUBBLE_RADIUS
+                current_dx = -abs(current_dx)
+                bounced = True
+            
+            if next_y - BUBBLE_RADIUS <= 0:
+                points.append((next_x, BUBBLE_RADIUS))
+                break
+            
+            hit_bubble = False
+            for bubble in self.bubbles:
+                dist_sq = (next_x - bubble.x())**2 + (next_y - bubble.y())**2
+                if dist_sq < (BUBBLE_RADIUS * 2) ** 2:
+                    points.append((next_x, next_y))
+                    hit_bubble = True
+                    break
+            
+            if hit_bubble:
+                break
+            
+            points.append((next_x, next_y))
+            current_x, current_y = next_x, next_y
+        
+        if len(points) >= 2:
+            # Gunakan DotLine agar lebih terlihat seperti guide game modern
+            # Warna putih dengan transparansi 150 (sedikit lebih terang dari sebelumnya)
+            pen = QPen(QColor(255, 255, 255, 150), 3, Qt.DotLine)
+            
+            for i in range(len(points) - 1):
+                line = QGraphicsLineItem(points[i][0], points[i][1], 
+                                        points[i+1][0], points[i+1][1])
+                line.setPen(pen)
+                line.setZValue(50) # Pastikan di atas background tapi di bawah UI
+                self.addItem(line)
+                
+                if not self.aim_line:
+                    self.aim_line = []
+                self.aim_line.append(line)
+    
+    def clear_aim_line(self):
+        """Hapus garis aim"""
+        if self.aim_line:
+            for line in self.aim_line:
+                self.removeItem(line)
+            self.aim_line = None
 
 class GameView(QGraphicsView):
     def __init__(self, scene):
         super().__init__(scene)
+
+        # --- LOGIC WALLPAPER BARU ---
+        bg_path = Path(__file__).parent / "ui" / "bubble_bgn.webp"
+        self.bg_pixmap = None
+        
+        if bg_path.exists():
+            # Load gambar
+            original_pix = QPixmap(str(bg_path))
+            # Opsional: Bisa di-darken sedikit biar bubble terlihat jelas
+            self.bg_pixmap = original_pix
+        # ----------------------------
+
         self.setRenderHint(QPainter.Antialiasing)
         self.setRenderHint(QPainter.SmoothPixmapTransform)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -863,9 +942,14 @@ class GameView(QGraphicsView):
         shooter_pos = self.scene_ref.shooter.pos()
         dx = pos.x() - shooter_pos.x()
         dy = shooter_pos.y() - pos.y()
+        
+        # Batasi agar tidak error saat kursor sejajar/di bawah shooter
         if dy > 0:
             angle = math.degrees(math.atan2(dy, dx))
+            # 1. Putar shooter
             self.scene_ref.shooter.set_angle(angle)
+            # 2. Update garis aim (INI YANG HILANG SEBELUMNYA)
+            self.scene_ref.update_aim_line(self.scene_ref.shooter.angle)
             
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -873,19 +957,46 @@ class GameView(QGraphicsView):
         elif event.button() == Qt.RightButton:
             self.scene_ref.swap_shooter_bubble()
 
-class WelcomeScreen(QWidget):
-    def __init__(self, start_callback, load_callback, quit_callback, music_callback, sfx_callback, custom_cursor=None):
+class WelcomeScreen(QWidget):      
+    def __init__(self, start_callback, load_callback, quit_callback, music_callback, sfx_callback, custom_cursor=None, music_on=True, sfx_on=True):
         super().__init__()
 
-        print(f"🔍 DEBUG WelcomeScreen: Received cursor = {type(custom_cursor)}")
-        print(f"🔍 DEBUG WelcomeScreen: cursor value = {custom_cursor}")
-        # Store custom cursor
+        # --- LOGIC WALLPAPER BARU ---
+        # Siapkan path gambar
+        bg_path = Path(__file__).parent / "ui" / "bubble_bgn.webp"
+        
+        self.bg_pixmap = None
+        if bg_path.exists():
+            self.bg_pixmap = QPixmap(str(bg_path))
+        else:
+            print(f"⚠️ Wallpaper not found at: {bg_path}")
+        # ----------------------------
+
+        # Simpan status awal ke variabel class
+        self.initial_music_on = music_on
+        self.initial_sfx_on = sfx_on
+
         self.custom_cursor = custom_cursor if custom_cursor else Qt.PointingHandCursor
         self.setup_ui(start_callback, load_callback, quit_callback, music_callback, sfx_callback)
         self.setAttribute(Qt.WA_StyledBackground, True)
 
-        self.setup_ui(start_callback, load_callback, quit_callback, music_callback, sfx_callback)
-        self.setAttribute(Qt.WA_StyledBackground, True)
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        
+        # JIKA GAMBAR ADA, PAKAI GAMBAR
+        if self.bg_pixmap:
+            # Menggambar gambar memenuhi layar (Stretch)
+            painter.drawPixmap(self.rect(), self.bg_pixmap)
+            
+            # Opsional: Tambah lapisan hitam transparan biar teks lebih terbaca
+            painter.fillRect(self.rect(), QColor(0, 0, 0, 80)) 
+            
+        else:
+            # FALLBACK: Kalau gambar gak ketemu, pakai warna lama
+            grad = QLinearGradient(0, 0, 0, self.height())
+            grad.setColorAt(0.0, QColor("#0f172a"))
+            grad.setColorAt(1.0, QColor("#1e293b"))
+            painter.fillRect(self.rect(), grad)
 
     def setup_ui(self, start_cb, load_cb, quit_cb, music_cb, sfx_cb):
         if has_custom_graphics():
@@ -897,7 +1008,6 @@ class WelcomeScreen(QWidget):
                 self.setPalette(palette)
                 self.setAutoFillBackground(True)
             else:
-            # Fallback stylesheet yang lebih spesifik agar tidak merusak tombol
                 self.setStyleSheet("""
                     WelcomeScreen {
                         background: qradialgradient(cx:0.5, cy:0.5, radius: 1.0,
@@ -905,7 +1015,6 @@ class WelcomeScreen(QWidget):
                     }
                 """)
         else:
-            # Default gradient
             self.setStyleSheet("""
                 QWidget {
                     background: qradialgradient(cx:0.5, cy:0.5, radius: 1.0,
@@ -920,14 +1029,21 @@ class WelcomeScreen(QWidget):
         # --- CONTAINER KARTU (GLASS EFFECT) ---
         card = QFrame()
         card.setFixedWidth(450)
+        
+        # --- PERBAIKAN DI SINI ---
+        # 1. Kita beri nama ID khusus untuk kartu ini agar style tidak bocor ke anak-anaknya (Title/Footer)
+        card.setObjectName("MainCard") 
+        
+        # 2. Ubah selector dari 'QFrame' menjadi '#MainCard' (hanya berlaku untuk kartu ini)
         card.setStyleSheet("""
-            QFrame {
+            #MainCard {
                 background-color: rgba(255, 255, 255, 0.08);
                 border: 1px solid rgba(255, 255, 255, 0.1);
                 border-radius: 30px;
                 padding: 40px;
             }
         """)
+        # -------------------------
         
         # Efek Shadow pada kartu
         shadow = QGraphicsDropShadowEffect()
@@ -943,6 +1059,7 @@ class WelcomeScreen(QWidget):
         # --- TITLE ---
         title = QLabel("MACAN\nBUBBLE SHOOTER")
         title.setAlignment(Qt.AlignCenter)
+        # --- PERBAIKAN DI SINI: Tambahkan border: none; ---
         title.setStyleSheet("""
             QLabel {
                 font-family: 'Segoe UI Black', 'Arial Black', sans-serif;
@@ -951,6 +1068,7 @@ class WelcomeScreen(QWidget):
                 color: #FFD700;
                 background: transparent;
                 margin-bottom: 10px;
+                border: none; 
             }
         """)
         # Shadow Teks Emas
@@ -965,17 +1083,17 @@ class WelcomeScreen(QWidget):
         # Separator Line
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("background-color: rgba(255, 255, 255, 0.2); max-height: 1px;")
+        # Pastikan garis ini tetap terlihat tapi tanpa border bawaan
+        line.setStyleSheet("background-color: rgba(255, 255, 255, 0.2); max-height: 1px; border: none;")
         card_layout.addWidget(line)
         card_layout.addSpacing(10)
 
         # --- BUTTON STYLES ---
-        # Kita menggunakan CSS modern dengan hover state
         btn_base_style = """
             QPushButton {
                 color: white;
                 border: none;
-                border-radius: 25px; /* Pill Shape */
+                border-radius: 25px;
                 padding: 15px;
                 font-family: 'Segoe UI', sans-serif;
                 font-size: 16px;
@@ -987,10 +1105,9 @@ class WelcomeScreen(QWidget):
             }
         """
         
-        # 1. Start Button (Orange/Gold Gradient)
+        # 1. Start Button
         btn_start = QPushButton("🚀  NEW GAME")
         btn_start.setCursor(self.custom_cursor)
-        print(f"🔍 DEBUG: btn_start cursor set to {btn_start.cursor()}")
         btn_start.setStyleSheet(btn_base_style + """
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #f59e0b, stop:1 #d97706);
@@ -1003,9 +1120,9 @@ class WelcomeScreen(QWidget):
         """)
         btn_start.clicked.connect(start_cb)
 
-        # 2. Load Button (Blue/Cyan Gradient)
+        # 2. Load Button
         btn_load = QPushButton("💾  CONTINUE")
-        btn_start.setCursor(self.custom_cursor)
+        btn_load.setCursor(self.custom_cursor)
         btn_load.setStyleSheet(btn_base_style + """
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #3b82f6, stop:1 #2563eb);
@@ -1017,9 +1134,9 @@ class WelcomeScreen(QWidget):
         """)
         btn_load.clicked.connect(load_cb)
 
-        # 3. Quit Button (Red/Rose Gradient) - Sedikit lebih kecil/transparan
+        # 3. Quit Button
         btn_quit = QPushButton("EXIT GAME")
-        btn_start.setCursor(self.custom_cursor)
+        btn_quit.setCursor(self.custom_cursor)
         btn_quit.setStyleSheet(btn_base_style + """
             QPushButton {
                 background: rgba(239, 68, 68, 0.2);
@@ -1049,7 +1166,7 @@ class WelcomeScreen(QWidget):
         
         checkbox_style = """
             QCheckBox {
-                color: #94a3b8;
+                color: white;
                 font-family: 'Segoe UI';
                 font-size: 13px;
                 font-weight: 600;
@@ -1063,7 +1180,7 @@ class WelcomeScreen(QWidget):
                 background: transparent;
             }
             QCheckBox::indicator:checked {
-                background: #10b981; /* Emerald Green */
+                background: #10b981;
                 border-color: #10b981;
             }
             QCheckBox:hover {
@@ -1072,16 +1189,22 @@ class WelcomeScreen(QWidget):
         """
 
         self.music_toggle = QCheckBox("MUSIC")
-        self.music_toggle.setChecked(True)
         self.music_toggle.setStyleSheet(checkbox_style)
-        btn_start.setCursor(self.custom_cursor)
+        self.music_toggle.setCursor(self.custom_cursor)
+        
+        # === PERBAIKAN UTAMA DI SINI ===
+        # Gunakan variabel self.initial_music_on, JANGAN True manual
+        self.music_toggle.setChecked(self.initial_music_on) 
         self.music_toggle.toggled.connect(music_cb)
 
         self.sfx_toggle = QCheckBox("SOUND FX")
-        self.sfx_toggle.setChecked(True)
         self.sfx_toggle.setStyleSheet(checkbox_style)
-        btn_start.setCursor(self.custom_cursor)
+        self.sfx_toggle.setCursor(self.custom_cursor)
+        
+        # Gunakan variabel self.initial_sfx_on
+        self.sfx_toggle.setChecked(self.initial_sfx_on)
         self.sfx_toggle.toggled.connect(sfx_cb)
+        # ===============================
 
         toggles_layout.addWidget(self.music_toggle)
         toggles_layout.addSpacing(30)
@@ -1091,14 +1214,15 @@ class WelcomeScreen(QWidget):
         card_layout.addWidget(toggles_frame)
         
         # Version
-        ver = QLabel("v3.0 Dynamic Edition")
+        ver = QLabel("v4.0.0 Dynamic Edition")
         ver.setAlignment(Qt.AlignCenter)
-        ver.setStyleSheet("color: rgba(255,255,255,0.2); font-size: 11px; margin-top: 10px; background: transparent;")
+        # --- PERBAIKAN DI SINI: Tambahkan border: none; ---
+        ver.setStyleSheet("color: white; font-size: 12px; margin-top: 10px; background: transparent; border: none;")
         card_layout.addWidget(ver)
 
         layout.addWidget(card)
 
-class MainWindow(QMainWindow):
+class MainWindow(QMainWindow):    
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Macan Bubble Shooter - Dynamic Edition")
@@ -1109,57 +1233,140 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(icon_path))
         self.showFullScreen()
 
+        # 1. SETUP PATH FOLDER (Paling Awal & Pasti)
+        self.user_data_dir = Path.home() / "AppData" / "Local" / "MacanBubbleShooter6"
+        self.save_dir = self.user_data_dir / "saves"
+        
+        # Buat folder save jika belum ada (PENTING: dilakukan di awal)
+        try:
+            self.save_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            print(f"❌ Error creating save directory: {e}")
 
         # === SETUP CUSTOM CURSOR ===
         self.custom_cursor = get_custom_cursor()
-        self.custom_hand_cursor = get_custom_cursor()  # Untuk button hover
+        self.custom_hand_cursor = get_custom_cursor()
         
         if self.custom_cursor:
             self.setCursor(self.custom_cursor)
-            print("✅ Custom cursor loaded successfully!")
         else:
-            # Fallback ke default cursor
             self.custom_cursor = Qt.CrossCursor
             self.custom_hand_cursor = Qt.PointingHandCursor
             self.setCursor(Qt.CrossCursor)
-            print("⚠️ Using default cursors (cursor.png not found)")
-        # ===========================
-        
-        # --- LOGIC SAVE DATA ---
-        self.save_dir = Path.home() / "AppData" / "Local" / "MacanBubbleShooter6"
-        self.save_dir.mkdir(parents=True, exist_ok=True)
-        # -------------------------------------
 
         # Sound Manager
         self.sound_manager = get_sound_manager()
-        self.music_enabled = True
-        self.sfx_enabled = True
+        
+        # 2. LOAD SETTINGS DATA (Variable Only)
+        # Kita load dulu status on/off ke memory sebelum bikin UI
+        self.load_settings_variables() 
 
         # --- SETUP STACKED WIDGET ---
         self.central_stack = QStackedWidget()
         self.setCentralWidget(self.central_stack)
 
-        # 1. Setup Welcome Screen (Index 0)
+        # 3. Setup Welcome Screen (Index 0)
         self.welcome_screen = WelcomeScreen(
             self.start_new_game,
             self.load_saved_game,
             self.close,
             self.toggle_music,
-            self.toggle_sfx
+            self.toggle_sfx,
+            # (Optional) Anda bisa memodifikasi WelcomeScreen untuk menerima status awal,
+            # tapi cara di bawah (sync_ui_settings) lebih mudah tanpa ubah class lain.
         )
         self.central_stack.addWidget(self.welcome_screen)
+        
+        # 4. TERAPKAN SETTINGS KE UI (Sync)
+        # Paksa UI mengikuti data yang sudah di-load
+        self.sync_ui_with_settings()
 
-        # 2. Setup Game Screen Container (Index 1)
-        # Kita harus membuat container ini dulu agar bisa dimasukkan ke stack
+        # 5. Setup Game Screen Container (Index 1)
         self.game_container = QWidget()
-        self.setup_game_ui() # Fungsi ini akan mengisi self.game_container
+        self.setup_game_ui()
         self.central_stack.addWidget(self.game_container)
 
-        # === AUDIO START ===
-        start_bgm()  # Mulai background music
+        # === AUDIO START (CONDITIONAL) ===
+        # Hanya nyalakan musik jika settingannya TRUE
+        if self.music_enabled:
+            start_bgm()
+        else:
+            # Pastikan mati
+            self.sound_manager.pause_bgm()
 
-        # Load High Score saja saat awal (Game data diload nanti lewat menu)
+        # Load High Score
         self.load_high_score_data()
+
+    # --- SETTINGS MANAGEMENT (FIXED) ---
+
+    def load_settings_variables(self):
+        """Hanya memuat data JSON ke variabel self.music/sfx_enabled"""
+        settings_path = self.save_dir / "settings.json"
+        
+        # Default Values
+        self.music_enabled = True
+        self.sfx_enabled = True
+
+        if settings_path.exists():
+            try:
+                with open(settings_path, 'r') as f:
+                    data = json.load(f)
+                    self.music_enabled = data.get('music_enabled', True)
+                    self.sfx_enabled = data.get('sfx_enabled', True)
+                print(f"📂 Loaded Settings: Music={self.music_enabled}, SFX={self.sfx_enabled}")
+            except Exception as e:
+                print(f"❌ Error reading settings file: {e}")
+        else:
+            print("⚠️ No settings file, using defaults (ON)")
+
+    def sync_ui_with_settings(self):
+        """Sinkronisasi Checkbox UI dengan variabel yang sudah di-load"""
+        try:
+            # Block signal agar tidak memicu toggle_music/sfx saat kita set status awal
+            self.welcome_screen.music_toggle.blockSignals(True)
+            self.welcome_screen.sfx_toggle.blockSignals(True)
+            
+            # Set Checkbox state
+            self.welcome_screen.music_toggle.setChecked(self.music_enabled)
+            self.welcome_screen.sfx_toggle.setChecked(self.sfx_enabled)
+            
+            # Unblock signal
+            self.welcome_screen.music_toggle.blockSignals(False)
+            self.welcome_screen.sfx_toggle.blockSignals(False)
+        except Exception as e:
+            print(f"⚠️ UI Sync Warning: {e}")
+
+    def save_settings(self):
+        """Simpan status saat ini ke JSON"""
+        # Pastikan folder ada (safety check)
+        if not self.save_dir.exists():
+            try:
+                self.save_dir.mkdir(parents=True, exist_ok=True)
+            except:
+                pass
+
+        data = {
+            'music_enabled': self.music_enabled,
+            'sfx_enabled': self.sfx_enabled
+        }
+        
+        try:
+            with open(self.save_dir / "settings.json", 'w') as f:
+                json.dump(data, f)
+            print(f"💾 Settings Saved: {data}")
+        except Exception as e:
+            print(f"❌ Failed to save settings: {e}")
+            
+    # Hapus/Ganti method load_settings yang lama dengan ini jika masih ada pemanggilan lain
+    def load_settings(self):
+        """Wrapper untuk kompatibilitas jika masih ada yang memanggil load_settings()"""
+        self.load_settings_variables()
+        self.sync_ui_with_settings()
+        if self.music_enabled:
+            if self.sound_manager.bgm_player.playbackState() != QMediaPlayer.PlayingState:
+                self.sound_manager.resume_bgm()
+        else:
+            self.sound_manager.pause_bgm()
         
     def setup_game_ui(self):
         """Membuat layout game (HUD + Scene View)"""
@@ -1303,13 +1510,14 @@ class MainWindow(QMainWindow):
             self.sound_manager.resume_bgm()
         else:
             self.sound_manager.pause_bgm()
+        
+        # Simpan setiap kali diklik
+        self.save_settings()
 
     def toggle_sfx(self, checked):
         self.sfx_enabled = checked
-        # Catatan: Logic untuk mute SFX (shoot, burst) harus diimplementasikan
-        # di file bubble_fx.py atau kita override fungsinya di sini jika memungkinkan.
-        # Karena kita tidak punya akses ubah bubble_fx, kita simpan flag ini.
-        # Idealnya: Kirim flag ini ke GameScene agar Scene tidak memanggil play_shoot()
+        # Simpan setiap kali diklik
+        self.save_settings()
 
     def create_power_panel(self):
         # === POWER UPS CONTAINER ===
@@ -1783,16 +1991,28 @@ class MainWindow(QMainWindow):
 
     def save_game(self):
         if self.scene.check_game_over_condition(): return
+        
+        # 1. Ambil data Power Up saat ini
+        power_manager = get_power_manager()
+        power_data = {}
+        
+        # Loop semua power yang ada di manager dan simpan jumlah charges-nya
+        for p_type, p_obj in power_manager.powers.items():
+            power_data[p_type] = p_obj.charges
+
         save_data = {
             'score': self.scene.score,
             'level': self.scene.level,
             'shots_until_drop': self.scene.shots_until_drop,
             'grid': self.scene.grid.grid,
             'shooter_current': self.scene.shooter.current_color,
-            'shooter_next': self.scene.shooter.next_color
+            'shooter_next': self.scene.shooter.next_color,
+            'powerups': power_data  # <--- INI BAGIAN PENTING YANG DITAMBAHKAN
         }
+        
         try:
             with open(self.save_dir / "save_v6.json", 'w') as f: json.dump(save_data, f)
+            print("✅ Game Saved with Skills!")
         except Exception as e: print(f"Save Fail: {e}")
 
     def load_game_data(self):
@@ -1816,18 +2036,35 @@ class MainWindow(QMainWindow):
                     self.scene.shooter.next_color = data.get('shooter_next', 1)
                     self.scene.shooter.update_loaded_bubble_visual()
                     
-                    # Refresh UI
+                    # === FIX: LOAD POWER UPS / SKILLS ===
+                    if 'powerups' in data:
+                        power_manager = get_power_manager()
+                        saved_powers = data['powerups']
+                        
+                        # Reset dan Update charges sesuai save file
+                        for p_type, count in saved_powers.items():
+                            if p_type in power_manager.powers:
+                                power_manager.powers[p_type].charges = count
+                        
+                        # Update tampilan tombol di UI (Agar angka di tombol berubah)
+                        self.update_all_power_buttons()
+                    # ====================================
+
+                    # Refresh UI Scene
                     self.scene.score_changed.emit(self.scene.score)
                     self.scene.level_changed.emit(self.scene.level)
                     self.scene.drop_counter_changed.emit(self.scene.shots_until_drop)
                     self.scene.next_bubble_changed.emit(self.scene.shooter.next_color)
                     self.scene.update_background_color()
+                    
+                    print("✅ Game Loaded Successfully!")
+                    
             except Exception as e:
                 print(f"Load Fail: {e}")
                 self.start_new_game() # Fallback jika file rusak
         else:
-            self.start_new_game()
-
+            self.start_new_game()    
+           
     def closeEvent(self, event):
         # Hanya auto-save jika sedang di dalam game (index 1)
         if self.central_stack.currentIndex() == 1:

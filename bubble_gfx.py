@@ -1,21 +1,24 @@
 """
-bubble_gfx.py - Graphics Asset Manager (Auto-Gen Version) - FIXED
-Membuat grafik secara otomatis jika file tidak ditemukan.
+bubble_gfx.py - Graphics Asset Manager (Cached Version)
+Mengelola aset grafis dengan sistem Caching untuk performa maksimal.
 """
 
 from pathlib import Path
-from PySide6.QtGui import QPixmap, QImage, QPainter, QColor, QBrush, QPen, QRadialGradient, QLinearGradient, QPolygonF
-from PySide6.QtCore import Qt, QPointF, QRectF
+from PySide6.QtGui import QPixmap, QPainter, QColor, QBrush, QPen, QRadialGradient, QLinearGradient, QPolygonF
+from PySide6.QtCore import Qt, QPointF
 import sys
 import random
+import os
 
 class BubbleGraphicsManager:
     def __init__(self, gfx_folder="bubble_img"):
-        # Cek folder (biarkan logic path tetap ada)
-        if hasattr(sys, "_MEIPASS"):
-            self.gfx_path = Path(sys._MEIPASS) / gfx_folder
-        else:
-            self.gfx_path = Path(__file__).parent / gfx_folder
+        # 1. Tentukan Path Cache (Sama dengan lokasi Save Data + folder 'cache')
+        # Lokasi: C:/Users/[User]/AppData/Local/MacanBubbleShooter6/cache
+        self.user_data_dir = Path.home() / "AppData" / "Local" / "MacanBubbleShooter6"
+        self.cache_dir = self.user_data_dir / "cache"
+        
+        # Buat folder cache jika belum ada
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         
         self.cache = {}
         
@@ -29,31 +32,59 @@ class BubbleGraphicsManager:
             {"base": QColor(100, 210, 255), "light": QColor(180, 240, 255), "dark": QColor(0, 100, 140)}   # Cyan
         ]
         
-        # Load atau Generate Assets
-        self._load_or_generate_assets()
+        # Load assets (Cek Cache dulu, baru Generate)
+        self._initialize_assets()
 
-    def _load_or_generate_assets(self):
-        """Mencoba load file, jika gagal, generate grafik via kode"""
-        print("🎨 Initializing Graphics (Auto-Generate Mode)...")
+    def _initialize_assets(self):
+        """Orchestrator untuk memuat aset"""
+        print(f"📂 Cache Directory: {self.cache_dir}")
         
-        # 1. Generate Bubbles (0-5)
+        # 1. Bubbles (0-5)
         for i in range(6):
-            pixmap = self._generate_bubble_graphic(i, 100)
-            self.cache[f"bubble_{i}"] = pixmap
-            print(f"  ✓ Generated bubble_{i}")
+            filename = f"bubble_{i}.png"
+            # Kita generate ukuran cukup besar (100px) agar tajam saat di-scale
+            self._load_or_create(f"bubble_{i}", filename, lambda: self._generate_bubble_graphic(i, 100))
 
-        # 2. Generate Launcher
-        self.cache["launcher"] = self._generate_launcher_graphic(100, 160)
-        print(f"  ✓ Generated launcher")
+        # 2. Launcher
+        self._load_or_create("launcher", "launcher.png", lambda: self._generate_launcher_graphic(100, 160))
 
-        # 3. Generate Background
-        self.cache["background"] = self._generate_background_graphic(1920, 1080)
-        print(f"  ✓ Generated background")
+        # 3. Background (Ukuran Full HD)
+        self._load_or_create("background", "background_nebula.png", lambda: self._generate_background_graphic(1920, 1080))
         
-        print("✅ All assets generated successfully!")
+        print("✅ All graphics assets ready!")
+
+    def _load_or_create(self, cache_key, filename, generator_func):
+        """
+        Logika Cerdas: Cek file -> Load jika ada -> Generate & Save jika tidak ada
+        """
+        file_path = self.cache_dir / filename
+        
+        # A. Coba Load dari Disk
+        if file_path.exists():
+            try:
+                pixmap = QPixmap(str(file_path))
+                if not pixmap.isNull():
+                    self.cache[cache_key] = pixmap
+                    # print(f"  ⚡ Loaded cached: {filename}")
+                    return
+            except Exception as e:
+                print(f"  ⚠️ Corrupt cache {filename}, regenerating... ({e})")
+
+        # B. Generate Baru (Jika file tidak ada atau rusak)
+        print(f"  🎨 Generating new asset: {filename}...")
+        pixmap = generator_func()
+        self.cache[cache_key] = pixmap
+        
+        # C. Simpan ke Disk untuk pemakaian berikutnya
+        try:
+            pixmap.save(str(file_path), "PNG")
+            print(f"  💾 Saved to cache: {filename}")
+        except Exception as e:
+            print(f"  ❌ Failed to save cache: {e}")
+
+    # --- GENERATORS (Logika Menggambar Asli) ---
 
     def _generate_bubble_graphic(self, color_index, size):
-        """Membuat gambar bubble 3D mengkilap dengan QPainter"""
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.transparent)
         
@@ -63,7 +94,7 @@ class BubbleGraphicsManager:
         
         c = self.colors[color_index % len(self.colors)]
         
-        # Shadow (Bayangan di bawah)
+        # Shadow
         shadow_grad = QRadialGradient(size*0.5, size*0.55, size*0.45)
         shadow_grad.setColorAt(0, QColor(0, 0, 0, 80))
         shadow_grad.setColorAt(1, QColor(0, 0, 0, 0))
@@ -71,7 +102,7 @@ class BubbleGraphicsManager:
         painter.setPen(Qt.NoPen)
         painter.drawEllipse(int(size*0.1), int(size*0.1), int(size*0.8), int(size*0.8))
         
-        # Main Bubble Body (Gradient 3D)
+        # Main Body
         grad = QRadialGradient(size*0.35, size*0.35, size*0.6)
         grad.setColorAt(0, c["light"])
         grad.setColorAt(0.4, c["base"])
@@ -82,7 +113,7 @@ class BubbleGraphicsManager:
         painter.setPen(QPen(c["dark"].darker(150), 2))
         painter.drawEllipse(int(size*0.05), int(size*0.05), int(size*0.9), int(size*0.9))
         
-        # Highlight Putih (Kilap)
+        # Highlight
         glow = QRadialGradient(size*0.3, size*0.25, size*0.3)
         glow.setColorAt(0, QColor(255, 255, 255, 200))
         glow.setColorAt(0.5, QColor(255, 255, 255, 100))
@@ -91,7 +122,7 @@ class BubbleGraphicsManager:
         painter.setPen(Qt.NoPen)
         painter.drawEllipse(int(size*0.15), int(size*0.1), int(size*0.4), int(size*0.4))
         
-        # Rim Light (Tepi bawah)
+        # Rim Light
         rim = QRadialGradient(size*0.5, size*0.7, size*0.35)
         rim.setColorAt(0, QColor(255, 255, 255, 0))
         rim.setColorAt(0.7, QColor(255, 255, 255, 60))
@@ -103,25 +134,21 @@ class BubbleGraphicsManager:
         return pixmap
 
     def _generate_launcher_graphic(self, w, h):
-        """Membuat gambar penembak cannon 3D"""
         pixmap = QPixmap(w, h)
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
         
-        # === BODY CANNON (Trapezoid) ===
+        # Body Cannon
         body = QPolygonF([
-            QPointF(w*0.25, h*0.95),  # Kiri bawah
-            QPointF(w*0.75, h*0.95),  # Kanan bawah
-            QPointF(w*0.65, h*0.3),   # Kanan atas
-            QPointF(w*0.35, h*0.3)    # Kiri atas
+            QPointF(w*0.25, h*0.95), QPointF(w*0.75, h*0.95),
+            QPointF(w*0.65, h*0.3), QPointF(w*0.35, h*0.3)
         ])
         
-        # Gradient metalik emas
         body_grad = QLinearGradient(0, h, 0, 0)
-        body_grad.setColorAt(0, QColor(184, 134, 11))   # Dark gold
-        body_grad.setColorAt(0.3, QColor(218, 165, 32)) # Gold
-        body_grad.setColorAt(0.5, QColor(255, 215, 0))  # Bright gold
+        body_grad.setColorAt(0, QColor(184, 134, 11))
+        body_grad.setColorAt(0.3, QColor(218, 165, 32))
+        body_grad.setColorAt(0.5, QColor(255, 215, 0))
         body_grad.setColorAt(0.7, QColor(218, 165, 32))
         body_grad.setColorAt(1, QColor(184, 134, 11))
         
@@ -129,12 +156,10 @@ class BubbleGraphicsManager:
         painter.setPen(QPen(QColor(139, 69, 19), 2.5))
         painter.drawPolygon(body)
         
-        # === MUZZLE (Ujung meriam) ===
+        # Muzzle
         muzzle = QPolygonF([
-            QPointF(w*0.35, h*0.3),
-            QPointF(w*0.65, h*0.3),
-            QPointF(w*0.6, h*0.05),
-            QPointF(w*0.4, h*0.05)
+            QPointF(w*0.35, h*0.3), QPointF(w*0.65, h*0.3),
+            QPointF(w*0.6, h*0.05), QPointF(w*0.4, h*0.05)
         ])
         
         muzzle_grad = QLinearGradient(0, h*0.3, 0, 0)
@@ -146,18 +171,16 @@ class BubbleGraphicsManager:
         painter.setPen(QPen(QColor(139, 69, 19), 2))
         painter.drawPolygon(muzzle)
         
-        # === HIGHLIGHT (Kilap) ===
+        # Highlight
         highlight = QPolygonF([
-            QPointF(w*0.4, h*0.9),
-            QPointF(w*0.45, h*0.9),
-            QPointF(w*0.43, h*0.4),
-            QPointF(w*0.41, h*0.4)
+            QPointF(w*0.4, h*0.9), QPointF(w*0.45, h*0.9),
+            QPointF(w*0.43, h*0.4), QPointF(w*0.41, h*0.4)
         ])
         painter.setBrush(QBrush(QColor(255, 255, 200, 150)))
         painter.setPen(Qt.NoPen)
         painter.drawPolygon(highlight)
         
-        # === BASE (Platform bawah) ===
+        # Base
         painter.setBrush(QBrush(QColor(139, 69, 19)))
         painter.setPen(QPen(QColor(101, 67, 33), 2))
         painter.drawEllipse(int(w*0.15), int(h*0.88), int(w*0.7), int(h*0.12))
@@ -166,161 +189,97 @@ class BubbleGraphicsManager:
         return pixmap
 
     def _generate_background_graphic(self, w, h):
-        """Membuat background luar angkasa dengan nebula"""
         pixmap = QPixmap(w, h)
         painter = QPainter(pixmap)
         
-        # === BASE GRADIENT (Deep Space) ===
+        # Base Gradient
         grad = QLinearGradient(0, 0, w, h)
-        grad.setColorAt(0, QColor(5, 10, 25))      # Dark blue-black
+        grad.setColorAt(0, QColor(5, 10, 25))
         grad.setColorAt(0.3, QColor(10, 15, 35))
         grad.setColorAt(0.6, QColor(15, 25, 45))
         grad.setColorAt(1, QColor(20, 30, 50))
         painter.fillRect(0, 0, w, h, grad)
         
-        # === NEBULA CLOUDS (Multi-layer) ===
+        # Nebula Clouds
         painter.setCompositionMode(QPainter.CompositionMode_Plus)
-        
-        # Purple nebula
-        for i in range(8):
-            x = random.randint(-w//4, w)
-            y = random.randint(-h//4, h)
-            radius = random.randint(200, 600)
-            nebula = QRadialGradient(x, y, radius)
+        for _ in range(8):
+            x, y = random.randint(-w//4, w), random.randint(-h//4, h)
+            r = random.randint(200, 600)
+            nebula = QRadialGradient(x, y, r)
             nebula.setColorAt(0, QColor(100, 50, 150, 40))
             nebula.setColorAt(0.5, QColor(80, 40, 120, 20))
             nebula.setColorAt(1, QColor(0, 0, 0, 0))
             painter.setBrush(QBrush(nebula))
             painter.setPen(Qt.NoPen)
-            painter.drawEllipse(x-radius, y-radius, radius*2, radius*2)
+            painter.drawEllipse(x-r, y-r, r*2, r*2)
         
-        # Blue nebula
-        for i in range(6):
-            x = random.randint(-w//4, w)
-            y = random.randint(-h//4, h)
-            radius = random.randint(250, 700)
-            nebula = QRadialGradient(x, y, radius)
+        for _ in range(6):
+            x, y = random.randint(-w//4, w), random.randint(-h//4, h)
+            r = random.randint(250, 700)
+            nebula = QRadialGradient(x, y, r)
             nebula.setColorAt(0, QColor(50, 100, 200, 35))
             nebula.setColorAt(0.5, QColor(30, 70, 150, 18))
             nebula.setColorAt(1, QColor(0, 0, 0, 0))
             painter.setBrush(QBrush(nebula))
-            painter.drawEllipse(x-radius, y-radius, radius*2, radius*2)
+            painter.drawEllipse(x-r, y-r, r*2, r*2)
         
         painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
         
-        # === STARS (Multiple layers untuk depth) ===
-        # Distant stars (small, dim)
+        # Stars
         painter.setPen(Qt.NoPen)
+        # Distant
         for _ in range(300):
-            x = random.randint(0, w)
-            y = random.randint(0, h)
-            size = random.uniform(0.5, 1.5)
-            opacity = random.randint(100, 180)
-            painter.setBrush(QColor(200, 200, 255, opacity))
-            painter.drawEllipse(int(x), int(y), int(size), int(size))
+            painter.setBrush(QColor(200, 200, 255, random.randint(100, 180)))
+            s = random.uniform(0.5, 1.5)
+            painter.drawEllipse(int(random.randint(0, w)), int(random.randint(0, h)), int(s), int(s))
         
-        # Mid-distance stars (medium)
+        # Mid
         for _ in range(150):
-            x = random.randint(0, w)
-            y = random.randint(0, h)
-            size = random.uniform(1.5, 3)
-            opacity = random.randint(150, 220)
-            painter.setBrush(QColor(255, 255, 255, opacity))
-            painter.drawEllipse(int(x), int(y), int(size), int(size))
+            painter.setBrush(QColor(255, 255, 255, random.randint(150, 220)))
+            s = random.uniform(1.5, 3)
+            painter.drawEllipse(int(random.randint(0, w)), int(random.randint(0, h)), int(s), int(s))
         
-        # Close stars (large, bright with glow)
+        # Bright Stars
         for _ in range(80):
-            x = random.randint(0, w)
-            y = random.randint(0, h)
-            size = random.uniform(2, 4)
-            
-            # Glow effect
-            glow = QRadialGradient(x, y, size*3)
+            x, y = random.randint(0, w), random.randint(0, h)
+            s = random.uniform(2, 4)
+            glow = QRadialGradient(x, y, s*3)
             glow.setColorAt(0, QColor(255, 255, 255, 200))
             glow.setColorAt(0.3, QColor(255, 255, 255, 100))
             glow.setColorAt(1, QColor(255, 255, 255, 0))
             painter.setBrush(QBrush(glow))
-            painter.drawEllipse(int(x-size*3), int(y-size*3), int(size*6), int(size*6))
-            
-            # Core
+            painter.drawEllipse(int(x-s*3), int(y-s*3), int(s*6), int(s*6))
             painter.setBrush(QColor(255, 255, 255))
-            painter.drawEllipse(int(x-size/2), int(y-size/2), int(size), int(size))
-        
-        # === SHOOTING STARS (Optional) ===
-        for _ in range(5):
-            x1 = random.randint(0, w-200)
-            y1 = random.randint(0, h)
-            length = random.randint(100, 250)
-            angle = random.uniform(-30, 30)
-            
-            x2 = x1 + length
-            y2 = y1 + length * (angle/100)
-            
-            gradient = QLinearGradient(x1, y1, x2, y2)
-            gradient.setColorAt(0, QColor(255, 255, 255, 0))
-            gradient.setColorAt(0.7, QColor(255, 255, 255, 180))
-            gradient.setColorAt(1, QColor(255, 255, 255, 255))
-            
-            painter.setPen(QPen(QBrush(gradient), 2))
-            painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+            painter.drawEllipse(int(x-s/2), int(y-s/2), int(s), int(s))
             
         painter.end()
         return pixmap
 
-    # --- Public Accessors ---
+    # --- Accessors ---
     
     def has_graphics(self):
-        """Check if graphics are available"""
         return len(self.cache) > 0
     
     def get_bubble_pixmap(self, color_index, size=None):
-        """Get bubble pixmap by color index
-        
-        Args:
-            color_index: Color index (0-5)
-            size: Tuple (width, height) or None to use original size
-            
-        Returns:
-            QPixmap or None
-        """
         key = f"bubble_{color_index}"
         pixmap = self.cache.get(key)
-        
         if pixmap and size:
             if isinstance(size, tuple):
                 return pixmap.scaled(size[0], size[1], Qt.KeepAspectRatio, Qt.SmoothTransformation)
             else:
-                # size adalah integer (diameter)
                 return pixmap.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         return pixmap
 
     def get_launcher_pixmap(self, size=None):
-        """Get launcher pixmap
-        
-        Args:
-            size: Tuple (width, height) or None
-            
-        Returns:
-            QPixmap or None
-        """
         pixmap = self.cache.get("launcher")
         if pixmap and size:
             if isinstance(size, tuple):
                 return pixmap.scaled(size[0], size[1], Qt.KeepAspectRatio, Qt.SmoothTransformation)
             else:
-                # Jika size adalah integer, anggap width, height auto
                 return pixmap.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         return pixmap
 
     def get_background_pixmap(self, size=None):
-        """Get background pixmap
-        
-        Args:
-            size: Tuple (width, height) or None
-            
-        Returns:
-            QPixmap or None
-        """
         pixmap = self.cache.get("background")
         if pixmap and size:
             if isinstance(size, tuple):
@@ -334,102 +293,51 @@ class BubbleGraphicsManager:
 _gfx_manager = None
 
 def get_graphics_manager():
-    """Get singleton graphics manager instance"""
     global _gfx_manager
     if _gfx_manager is None:
         _gfx_manager = BubbleGraphicsManager()
     return _gfx_manager
 
 def get_bubble_pixmap(color_index, diameter):
-    """Get bubble pixmap with specific diameter
-    
-    Args:
-        color_index: Color index (0-5)
-        diameter: Diameter in pixels
-        
-    Returns:
-        QPixmap or None
-    """
     manager = get_graphics_manager()
     return manager.get_bubble_pixmap(color_index, (diameter, diameter))
 
 def get_launcher_pixmap(width, height):
-    """Get launcher pixmap with specific size
-    
-    Args:
-        width: Width in pixels
-        height: Height in pixels
-        
-    Returns:
-        QPixmap or None
-    """
     manager = get_graphics_manager()
     return manager.get_launcher_pixmap((width, height))
 
 def get_background_pixmap(width, height):
-    """Get background pixmap with specific size
-    
-    Args:
-        width: Width in pixels
-        height: Height in pixels
-        
-    Returns:
-        QPixmap or None
-    """
     manager = get_graphics_manager()
     return manager.get_background_pixmap((width, height))
 
 def has_custom_graphics():
-    """Check if custom graphics are available
-    
-    Returns:
-        bool: Always True in auto-generate mode
-    """
     return get_graphics_manager().has_graphics()
 
 def get_custom_cursor():
-    """Load custom cursor from cursor.png
-    
-    Returns:
-        QCursor or None if file not found
-    """
+    """Load custom cursor from cursor.png or cache if available"""
     from PySide6.QtGui import QCursor, QPixmap
     from PySide6.QtCore import Qt
-    from pathlib import Path
-    import sys
     
-    # Cari file cursor.png
-    if hasattr(sys, "_MEIPASS"):
-        cursor_path = Path(sys._MEIPASS) / "cursor.png"
+    # Cek di folder cache dulu (siapa tahu user masukin custom cursor di folder data)
+    user_data_dir = Path.home() / "AppData" / "Local" / "MacanBubbleShooter6"
+    cursor_cache = user_data_dir / "cursor.png"
+    
+    path_to_check = None
+    
+    if cursor_cache.exists():
+        path_to_check = cursor_cache
+    elif hasattr(sys, "_MEIPASS"):
+        path_to_check = Path(sys._MEIPASS) / "./ui/cursor.png"
     else:
-        cursor_path = Path(__file__).parent / "cursor.png"
-    
-    print(f"🔍 Looking for cursor at: {cursor_path}")
-    print(f"🔍 File exists: {cursor_path.exists()}")
-    
-    if cursor_path.exists():
+        path_to_check = Path(__file__).parent / "./ui/cursor.png"
+        
+    if path_to_check and path_to_check.exists():
         try:
-            pixmap = QPixmap(str(cursor_path))
-            print(f"🔍 Pixmap loaded: {not pixmap.isNull()}, size: {pixmap.width()}x{pixmap.height()}")
-            
+            pixmap = QPixmap(str(path_to_check))
             if not pixmap.isNull():
-                # Scale jika terlalu besar (max 32x32 untuk cursor)
                 if pixmap.width() > 32 or pixmap.height() > 32:
                     pixmap = pixmap.scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                    print(f"🔍 Scaled to: {pixmap.width()}x{pixmap.height()}")
-                
-                # Hotspot di tengah cursor
-                hotspot_x = pixmap.width() // 2
-                hotspot_y = pixmap.height() // 2
-                
-                cursor = QCursor(pixmap, hotspot_x, hotspot_y)
-                print(f"✅ QCursor created successfully with hotspot ({hotspot_x}, {hotspot_y})")
-                return cursor
-            else:
-                print("❌ Pixmap is null (failed to load)")
-        except Exception as e:
-            print(f"❌ Failed to load cursor.png: {e}")
-    else:
-        print(f"❌ cursor.png not found at {cursor_path}")
-    
+                return QCursor(pixmap, pixmap.width() // 2, pixmap.height() // 2)
+        except:
+            pass
     return None
