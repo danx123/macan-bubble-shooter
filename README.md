@@ -6,7 +6,7 @@ A professional, full-featured bubble shooter game with a jungle/tiger theme buil
 ![PySide6](https://img.shields.io/badge/PySide6-6.0+-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-<div align="center">
+
 <img width="1365" height="767" alt="Screenshot 2025-12-23 205827" src="https://github.com/user-attachments/assets/b6d2995a-c116-4f0e-af22-8bc50f4235e1" />
 
 
