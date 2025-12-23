@@ -115,13 +115,17 @@ macan-bubble-shooter/
 - **State Management**: Comprehensive game state tracking
 
 ## 📸 Screenshot
-<img width="1365" height="767" alt="Screenshot 2025-12-18 195134" src="https://github.com/user-attachments/assets/9c826042-5e93-41e8-a6fd-bce0d6c072b2" />
-<img width="1365" height="762" alt="Screenshot 2025-12-15 202829" src="https://github.com/user-attachments/assets/b668ed31-3b3b-43e5-8837-15b41ee81299" />
+<img width="1365" height="767" alt="Screenshot 2025-12-23 205827" src="https://github.com/user-attachments/assets/f9b4fc58-909d-4389-a858-08911492c649" />
+<img width="1365" height="767" alt="Screenshot 2025-12-23 205848" src="https://github.com/user-attachments/assets/38ea049f-45d6-4b15-a5c4-afbc95f8592d" />
 
 
 
-## 📝 Changelog v3.8.0
-- Fixed save & load powerups
+
+
+## 📝 Changelog v4.0.0
+- Fixed save & load settings
+- Added Wallpaper (Welcome Screen & Game Scene)
+- Replace Bgm from mp3 to wav
 
 
 ## 🔧 Customization
