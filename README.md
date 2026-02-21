@@ -6,8 +6,9 @@ A professional, full-featured bubble shooter game with a jungle/tiger theme buil
 ![PySide6](https://img.shields.io/badge/PySide6-6.0+-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
+<img width="1365" height="767" alt="Screenshot 2026-02-22 034408" src="https://github.com/user-attachments/assets/c9ccb975-905c-47b1-9696-8dc50a9abd1c" />
 
-<img width="1365" height="767" alt="Screenshot 2025-12-23 205827" src="https://github.com/user-attachments/assets/b6d2995a-c116-4f0e-af22-8bc50f4235e1" />
+
 
 
 ## ✨ Features
@@ -117,19 +118,6 @@ macan-bubble-shooter/
 - **Signal-Slot Pattern**: Event-driven HUD updates
 - **Scene Graph**: Efficient rendering with QGraphicsScene
 - **State Management**: Comprehensive game state tracking
-
-## 📸 Screenshot
-<img width="1365" height="767" alt="Screenshot 2025-12-23 205827" src="https://github.com/user-attachments/assets/f9b4fc58-909d-4389-a858-08911492c649" />
-<img width="1365" height="767" alt="Screenshot 2025-12-23 205848" src="https://github.com/user-attachments/assets/38ea049f-45d6-4b15-a5c4-afbc95f8592d" />
-
-
-
-
-
-## 📝 Changelog v4.0.0
-- Fixed save & load settings
-- Added Wallpaper (Welcome Screen & Game Scene)
-- Replace Bgm from mp3 to wav
 
 
 ## 🔧 Customization
