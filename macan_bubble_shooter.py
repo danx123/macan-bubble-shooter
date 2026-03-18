@@ -35,6 +35,17 @@ from bubble_achievement import (
 )
 from bubble_ui import LeaderboardDialog, AchievementDialog, GameOverDialog
 
+# === SPECIAL FEATURES ===
+from bubble_special import (
+    BossBubble, ObstacleBubble, OBSTACLE_COLOR_INDEX,
+    should_spawn_boss, create_boss_bubble, obstacle_chance,
+    is_colorblind_mode, set_colorblind_mode, get_cb_symbol,
+    apply_colorblind_to_bubble,
+    get_replay_manager, get_replay_recorder,
+    ReplayPlayer,
+)
+from bubble_daily import get_daily_manager, DAILY_SHOTS_CAP
+
 # --- Game Configuration ---
 BUBBLE_RADIUS = 22
 ROWS = 14
@@ -109,10 +120,8 @@ class Bubble(QObject, QGraphicsEllipseItem):
             gradient.setColorAt(0.6, QColor(0, 255, 0))
             gradient.setColorAt(0.8, QColor(0, 0, 255))
             gradient.setColorAt(1, QColor(255, 0, 255))
-            
             self.setBrush(QBrush(gradient))
             self.setPen(QPen(QColor(255, 255, 255), 3))
-            
             rainbow_text = QGraphicsTextItem("🌈", self)
             rainbow_text.setDefaultTextColor(Qt.white)
             font = QFont("Segoe UI Emoji", int(self.radius_val * 0.8), QFont.Bold)
@@ -120,19 +129,41 @@ class Bubble(QObject, QGraphicsEllipseItem):
             text_rect = rainbow_text.boundingRect()
             rainbow_text.setPos(-text_rect.width()/2, -text_rect.height()/2)
             return
-        
-        if self.color_index >= len(BUBBLE_PALETTE): 
+
+        if self.color_index >= len(BUBBLE_PALETTE):
             self.color_index = 0
-        
+
         palette = BUBBLE_PALETTE[self.color_index]
-        
-        gradient = QRadialGradient(-self.radius_val * 0.3, -self.radius_val * 0.3, self.radius_val * 1.5)
-        gradient.setColorAt(0, palette["light"])
-        gradient.setColorAt(0.3, palette["base"])
-        gradient.setColorAt(1, palette["dark"])
-        
-        self.setBrush(QBrush(gradient))
-        self.setPen(QPen(palette["dark"].darker(150), 1.5))
+
+        # Color-blind mode: swap to high-contrast color
+        if is_colorblind_mode():
+            from bubble_special import get_cb_color
+            cb_col = get_cb_color(self.color_index)
+            cb_light = cb_col.lighter(140)
+            cb_dark  = cb_col.darker(140)
+            gradient = QRadialGradient(-self.radius_val * 0.3, -self.radius_val * 0.3, self.radius_val * 1.5)
+            gradient.setColorAt(0, cb_light)
+            gradient.setColorAt(0.3, cb_col)
+            gradient.setColorAt(1, cb_dark)
+            self.setBrush(QBrush(gradient))
+            self.setPen(QPen(cb_dark.darker(150), 1.5))
+            # Overlay symbol
+            from bubble_special import get_cb_symbol
+            sym = get_cb_symbol(self.color_index)
+            sym_label = QGraphicsTextItem(sym, self)
+            sym_font  = QFont("Segoe UI", int(self.radius_val * 0.55), QFont.Bold)
+            sym_label.setFont(sym_font)
+            sym_label.setDefaultTextColor(QColor(255, 255, 255))
+            bw = sym_label.boundingRect().width()
+            bh = sym_label.boundingRect().height()
+            sym_label.setPos(-bw / 2, -bh / 2)
+        else:
+            gradient = QRadialGradient(-self.radius_val * 0.3, -self.radius_val * 0.3, self.radius_val * 1.5)
+            gradient.setColorAt(0, palette["light"])
+            gradient.setColorAt(0.3, palette["base"])
+            gradient.setColorAt(1, palette["dark"])
+            self.setBrush(QBrush(gradient))
+            self.setPen(QPen(palette["dark"].darker(150), 1.5))
 
     def move_to_grid_pos(self, x, y):
         if self.anim:
@@ -545,6 +576,18 @@ class GameScene(QGraphicsScene):
         self._danger_zone = DangerZoneOverlay(self, self.scene_width, self.scene_height, self.shooter.y())
         self._last_danger_level = 0
 
+        # === BOSS / OBSTACLE TRACKING ===
+        self.boss_bubbles: list = []      # BossBubble items in scene
+        self.obstacle_bubbles: list = []  # ObstacleBubble items in scene
+
+        # === REPLAY RECORDER ===
+        self.recorder = get_replay_recorder()
+        self.recorder.start()
+
+        # === DAILY CHALLENGE ===
+        self.daily_mode   = False
+        self.daily_shots  = 0
+
         # Tracking state
         self._no_miss_streak    = 0
         self._speed_shot_streak = 0
@@ -656,6 +699,14 @@ class GameScene(QGraphicsScene):
         # Update achievement tracking
         self.score_mgr.on_shot_fired()
         self.ach_mgr.on_shots(self.score_mgr.total_shots, self._no_miss_streak)
+
+        # === REPLAY: record shot ===
+        self.recorder.record_shot(angle, self.shooter.current_color)
+
+        # === DAILY: count shots ===
+        if self.daily_mode:
+            self.daily_shots += 1
+            get_daily_manager().on_shot_fired()
             
         self.shooting = True
         color = self.shooter.current_color
@@ -746,6 +797,23 @@ class GameScene(QGraphicsScene):
                     if dist_sq < (BUBBLE_RADIUS * 1.8) ** 2:
                         self.attach_bubble()
                         return
+
+            # 6b. Cek Tabrakan dengan Boss Bubbles
+            for boss in self.boss_bubbles[:]:
+                boss_r = boss.radius_val + BUBBLE_RADIUS
+                dx = new_x - boss.x()
+                dy = new_y - boss.y()
+                if dx*dx + dy*dy < boss_r * boss_r:
+                    # Hit boss
+                    still_alive = boss.take_hit()
+                    if not still_alive:
+                        self._on_boss_destroyed(boss)
+                    # Flying bubble is consumed
+                    self.removeItem(self.flying_bubble)
+                    self.flying_bubble = None
+                    self.shooting = False
+                    self.shot_timer.start(rush_mode=self.rush_mgr.rush_active)
+                    return
                 
     def attach_bubble(self):
         if not self.flying_bubble:
@@ -990,6 +1058,39 @@ class GameScene(QGraphicsScene):
             self.score_mgr._add_score(ach_def.reward_score)
         self.achievement_earned.emit(ach_def)
 
+    def _on_boss_destroyed(self, boss):
+        """Called when a boss bubble's HP reaches 0."""
+        # Award score
+        bonus = 200 + boss.max_hp * 50
+        popup_x = boss.x()
+        popup_y = boss.y()
+        self.score_mgr.on_powerup_effect(1, bonus, popup_x, popup_y, "👑 BOSS!")
+        play_combo()
+        self.create_explosion(boss.x(), boss.y(), QColor(255, 215, 0))
+        # Remove from scene and lists
+        boss.cleanup()
+        self.removeItem(boss)
+        if boss in self.boss_bubbles:
+            self.boss_bubbles.remove(boss)
+        # Also remove from grid if tracked
+        for row in range(len(self.grid.grid)):
+            for col in range(len(self.grid.grid[row])):
+                if self.grid.grid[row][col] == -3:   # boss sentinel
+                    gx, gy = self.grid.get_position(row, col)
+                    if abs(gx - boss.x()) < 5 and abs(gy - boss.y()) < 5:
+                        self.grid.grid[row][col] = None
+
+    def try_spawn_boss_after_match(self, match_size: int, x: float, y: float):
+        """Possibly spawn a boss bubble near the match site after a big match."""
+        if should_spawn_boss(self.level, match_size):
+            color = random.randint(0, len(BUBBLE_PALETTE) - 1)
+            boss  = create_boss_bubble(color, x + random.randint(-40, 40),
+                                       max(BUBBLE_RADIUS * 2, y - BUBBLE_RADIUS * 3),
+                                       self.level)
+            boss.destroyed.connect(lambda b: self._on_boss_destroyed(b))
+            self.addItem(boss)
+            self.boss_bubbles.append(boss)
+
     def check_matches(self, row, col):
         color = self.grid.grid[row][col]
         matched = set()
@@ -1031,6 +1132,16 @@ class GameScene(QGraphicsScene):
             self.ach_mgr.on_combo(self.score_mgr.combo)
             self.ach_mgr.on_streak(self.score_mgr.streak)
             self.ach_mgr.on_score(self.score_mgr.score)
+
+            # === REPLAY: record match ===
+            self.recorder.record_match(len(matched), self.score_mgr.score)
+
+            # === DAILY: record points ===
+            if self.daily_mode:
+                get_daily_manager().on_match(self.score_mgr.score)
+
+            # === BOSS SPAWN: chance after big matches ===
+            self.try_spawn_boss_after_match(len(matched), mx, my)
 
             for r, c in matched:
                 self.grid.grid[r][c] = None
@@ -1272,6 +1383,21 @@ class GameScene(QGraphicsScene):
 
         # === Reset Danger Zone ===
         self._danger_zone.update_danger([])   # clears all danger visuals
+
+        # === Reset Boss / Obstacle lists ===
+        for boss in self.boss_bubbles:
+            boss.cleanup()
+            try: self.removeItem(boss)
+            except: pass
+        self.boss_bubbles.clear()
+        self.obstacle_bubbles.clear()
+
+        # === Reset Replay Recorder ===
+        self.recorder.start()
+
+        # === Reset Daily state ===
+        self.daily_mode  = False
+        self.daily_shots = 0
     def update_aim_line(self, angle):
         """Update garis aim dengan pantulan - presisi di kedua dinding"""
         self.clear_aim_line()
@@ -1427,267 +1553,245 @@ class GameView(QGraphicsView):
         elif event.button() == Qt.RightButton:
             self.scene_ref.swap_shooter_bubble()
 
-class WelcomeScreen(QWidget):      
-    def __init__(self, start_callback, load_callback, quit_callback, music_callback, sfx_callback, custom_cursor=None, music_on=True, sfx_on=True):
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key in (Qt.Key_Escape, Qt.Key_P):
+            # Find MainWindow ancestor and toggle pause
+            p = self.parent()
+            while p:
+                if hasattr(p, 'toggle_pause'):
+                    p.toggle_pause()
+                    break
+                p = p.parent() if hasattr(p, 'parent') else None
+        else:
+            super().keyPressEvent(event)
+
+class WelcomeScreen(QWidget):
+    def __init__(self, start_callback, load_callback, quit_callback,
+                 music_callback, sfx_callback,
+                 daily_callback=None, leaderboard_callback=None,
+                 achievements_callback=None, colorblind_callback=None,
+                 custom_cursor=None, music_on=True, sfx_on=True,
+                 colorblind_on=False):
         super().__init__()
 
-        # --- LOGIC WALLPAPER BARU ---
-        # Siapkan path gambar
         bg_path = Path(__file__).parent / "ui" / "bubble_bgn.webp"
-        
         self.bg_pixmap = None
         if bg_path.exists():
             self.bg_pixmap = QPixmap(str(bg_path))
-        else:
-            print(f"⚠️ Wallpaper not found at: {bg_path}")
-        # ----------------------------
 
-        # Simpan status awal ke variabel class
-        self.initial_music_on = music_on
-        self.initial_sfx_on = sfx_on
+        self.initial_music_on    = music_on
+        self.initial_sfx_on      = sfx_on
+        self.initial_colorblind  = colorblind_on
+        self.custom_cursor       = custom_cursor if custom_cursor else Qt.PointingHandCursor
 
-        self.custom_cursor = custom_cursor if custom_cursor else Qt.PointingHandCursor
-        self.setup_ui(start_callback, load_callback, quit_callback, music_callback, sfx_callback)
+        self._daily_cb        = daily_callback
+        self._lb_cb           = leaderboard_callback
+        self._ach_cb          = achievements_callback
+        self._cb_cb           = colorblind_callback
+
+        self.setup_ui(start_callback, load_callback, quit_callback,
+                      music_callback, sfx_callback)
         self.setAttribute(Qt.WA_StyledBackground, True)
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        
-        # JIKA GAMBAR ADA, PAKAI GAMBAR
         if self.bg_pixmap:
-            # Menggambar gambar memenuhi layar (Stretch)
             painter.drawPixmap(self.rect(), self.bg_pixmap)
-            
-            # Opsional: Tambah lapisan hitam transparan biar teks lebih terbaca
-            painter.fillRect(self.rect(), QColor(0, 0, 0, 80)) 
-            
+            painter.fillRect(self.rect(), QColor(0, 0, 0, 80))
         else:
-            # FALLBACK: Kalau gambar gak ketemu, pakai warna lama
             grad = QLinearGradient(0, 0, 0, self.height())
             grad.setColorAt(0.0, QColor("#0f172a"))
             grad.setColorAt(1.0, QColor("#1e293b"))
             painter.fillRect(self.rect(), grad)
 
     def setup_ui(self, start_cb, load_cb, quit_cb, music_cb, sfx_cb):
-        if has_custom_graphics():
-            bg_pixmap = get_background_pixmap(1920, 1080) 
-
-            if bg_pixmap:
-                palette = QPalette()
-                palette.setBrush(QPalette.Window, QBrush(bg_pixmap))
-                self.setPalette(palette)
-                self.setAutoFillBackground(True)
-            else:
-                self.setStyleSheet("""
-                    WelcomeScreen {
-                        background: qradialgradient(cx:0.5, cy:0.5, radius: 1.0,
-                            fx:0.5, fy:0.5, stop:0 #1e293b, stop:1 #020617);
-                    }
-                """)
-        else:
-            self.setStyleSheet("""
-                QWidget {
-                    background: qradialgradient(cx:0.5, cy:0.5, radius: 1.0,
-                        fx:0.5, fy:0.5, stop:0 #1e293b, stop:1 #020617);
-                }
-            """)
-        
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # --- CONTAINER KARTU (GLASS EFFECT) ---
+        # ── Main card ──────────────────────────────────────────────────
         card = QFrame()
-        card.setFixedWidth(450)
-        
-        # --- PERBAIKAN DI SINI ---
-        # 1. Kita beri nama ID khusus untuk kartu ini agar style tidak bocor ke anak-anaknya (Title/Footer)
-        card.setObjectName("MainCard") 
-        
-        # 2. Ubah selector dari 'QFrame' menjadi '#MainCard' (hanya berlaku untuk kartu ini)
+        card.setFixedWidth(480)
+        card.setObjectName("MainCard")
         card.setStyleSheet("""
             #MainCard {
-                background-color: rgba(255, 255, 255, 0.08);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 30px;
-                padding: 40px;
+                background-color: rgba(10, 15, 30, 0.88);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 28px;
             }
         """)
-        # -------------------------
-        
-        # Efek Shadow pada kartu
         shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(50)
-        shadow.setColor(QColor(0, 0, 0, 150))
-        shadow.setOffset(0, 15)
+        shadow.setBlurRadius(60)
+        shadow.setColor(QColor(0, 0, 0, 180))
+        shadow.setOffset(0, 18)
         card.setGraphicsEffect(shadow)
 
         card_layout = QVBoxLayout(card)
-        card_layout.setSpacing(20)
+        card_layout.setSpacing(10)
+        card_layout.setContentsMargins(32, 32, 32, 28)
         card_layout.setAlignment(Qt.AlignCenter)
 
-        # --- TITLE ---
-        title = QLabel("MACAN\nBUBBLE SHOOTER")
+        # ── Title ──────────────────────────────────────────────────────
+        title = QLabel("🐯  MACAN\nBUBBLE SHOOTER")
         title.setAlignment(Qt.AlignCenter)
-        # --- PERBAIKAN DI SINI: Tambahkan border: none; ---
         title.setStyleSheet("""
             QLabel {
                 font-family: 'Segoe UI Black', 'Arial Black', sans-serif;
-                font-size: 28px;
-                font-weight: 900;
-                color: #FFD700;
-                background: transparent;
-                margin-bottom: 10px;
-                border: none; 
+                font-size: 26px; font-weight: 900;
+                color: #FFD700; background: transparent; border: none;
+                margin-bottom: 4px; letter-spacing: 1px;
             }
         """)
-        # Shadow Teks Emas
-        text_shadow = QGraphicsDropShadowEffect()
-        text_shadow.setBlurRadius(15)
-        text_shadow.setColor(QColor(255, 215, 0, 120))
-        text_shadow.setOffset(0, 0)
-        title.setGraphicsEffect(text_shadow)
-        
+        glow = QGraphicsDropShadowEffect()
+        glow.setBlurRadius(18)
+        glow.setColor(QColor(255, 215, 0, 110))
+        glow.setOffset(0, 0)
+        title.setGraphicsEffect(glow)
         card_layout.addWidget(title)
 
-        # Separator Line
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        # Pastikan garis ini tetap terlihat tapi tanpa border bawaan
-        line.setStyleSheet("background-color: rgba(255, 255, 255, 0.2); max-height: 1px; border: none;")
-        card_layout.addWidget(line)
-        card_layout.addSpacing(10)
+        # Separator
+        sep = QFrame(); sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("background: rgba(255,255,255,0.15); max-height: 1px; border: none;")
+        card_layout.addWidget(sep)
+        card_layout.addSpacing(6)
 
-        # --- BUTTON STYLES ---
-        btn_base_style = """
-            QPushButton {
-                color: white;
-                border: none;
-                border-radius: 25px;
-                padding: 15px;
-                font-family: 'Segoe UI', sans-serif;
-                font-size: 16px;
-                font-weight: bold;
-                letter-spacing: 1px;
-            }
-            QPushButton:pressed {
-                margin-top: 2px;
-            }
-        """
-        
-        # 1. Start Button
-        btn_start = QPushButton("🚀  NEW GAME")
-        btn_start.setCursor(self.custom_cursor)
-        btn_start.setStyleSheet(btn_base_style + """
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #f59e0b, stop:1 #d97706);
-                border-bottom: 4px solid #b45309;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #fbbf24, stop:1 #f59e0b);
-                border-bottom: 4px solid #d97706;
-            }
-        """)
-        btn_start.clicked.connect(start_cb)
+        # ── Button helper ──────────────────────────────────────────────
+        def _btn(label, grad_start, grad_end, border_col, cb, secondary=False):
+            b = QPushButton(label)
+            b.setCursor(self.custom_cursor)
+            if secondary:
+                b.setStyleSheet(f"""
+                    QPushButton {{
+                        color: white; border: none; border-radius: 22px;
+                        padding: 13px 10px;
+                        font-family: 'Segoe UI'; font-size: 15px; font-weight: bold;
+                        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                            stop:0 {grad_start}, stop:1 {grad_end});
+                        border-bottom: 3px solid {border_col};
+                    }}
+                    QPushButton:hover {{
+                        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                            stop:0 {grad_end}, stop:1 {grad_start});
+                    }}
+                    QPushButton:pressed {{ margin-top: 2px; }}
+                """)
+            else:
+                b.setStyleSheet(f"""
+                    QPushButton {{
+                        color: white; border: none; border-radius: 25px;
+                        padding: 15px 10px;
+                        font-family: 'Segoe UI'; font-size: 16px; font-weight: bold;
+                        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                            stop:0 {grad_start}, stop:1 {grad_end});
+                        border-bottom: 4px solid {border_col};
+                    }}
+                    QPushButton:hover {{
+                        background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                            stop:0 {grad_end}, stop:1 {grad_start});
+                    }}
+                    QPushButton:pressed {{ margin-top: 2px; }}
+                """)
+            if cb:
+                b.clicked.connect(cb)
+            return b
 
-        # 2. Load Button
-        btn_load = QPushButton("💾  CONTINUE")
-        btn_load.setCursor(self.custom_cursor)
-        btn_load.setStyleSheet(btn_base_style + """
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #3b82f6, stop:1 #2563eb);
-                border-bottom: 4px solid #1d4ed8;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #60a5fa, stop:1 #3b82f6);
-            }
-        """)
-        btn_load.clicked.connect(load_cb)
+        # ── Primary action buttons ─────────────────────────────────────
+        btn_start = _btn("🚀  NEW GAME",   "#f59e0b", "#d97706", "#b45309", start_cb)
+        btn_load  = _btn("💾  CONTINUE",   "#3b82f6", "#2563eb", "#1d4ed8", load_cb)
 
-        # 3. Quit Button
-        btn_quit = QPushButton("EXIT GAME")
-        btn_quit.setCursor(self.custom_cursor)
-        btn_quit.setStyleSheet(btn_base_style + """
-            QPushButton {
-                background: rgba(239, 68, 68, 0.2);
-                border: 1px solid rgba(239, 68, 68, 0.5);
-                color: #fca5a5;
-                font-size: 13px;
-                padding: 12px;
-                border-radius: 20px;
-            }
-            QPushButton:hover {
-                background: rgba(239, 68, 68, 0.4);
-                color: white;
-            }
-        """)
-        btn_quit.clicked.connect(quit_cb)
+        # Daily Challenge — highlight if not yet played today
+        daily_mgr = get_daily_manager()
+        daily_label = "📅  DAILY CHALLENGE"
+        if daily_mgr.is_today_completed():
+            daily_label = f"📅  DAILY  ✅  {daily_mgr.today_score:,} pts"
+        btn_daily = _btn(daily_label, "#059669", "#047857", "#065f46",
+                         self._daily_cb)
 
         card_layout.addWidget(btn_start)
         card_layout.addWidget(btn_load)
-        card_layout.addSpacing(10)
+        card_layout.addWidget(btn_daily)
+
+        # ── Secondary row: Leaderboard + Achievements ──────────────────
+        sec_row = QHBoxLayout()
+        sec_row.setSpacing(8)
+
+        btn_lb  = _btn("🏆  LEADERBOARD", "#78350f", "#92400e", "#451a03",
+                       self._lb_cb, secondary=True)
+        btn_ach = _btn("🏅  ACHIEVEMENTS", "#4c1d95", "#5b21b6", "#2e1065",
+                       self._ach_cb, secondary=True)
+
+        sec_row.addWidget(btn_lb)
+        sec_row.addWidget(btn_ach)
+        card_layout.addLayout(sec_row)
+
+        # ── Quit ───────────────────────────────────────────────────────
+        btn_quit = QPushButton("EXIT GAME")
+        btn_quit.setCursor(self.custom_cursor)
+        btn_quit.setStyleSheet("""
+            QPushButton {
+                background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.4);
+                color: #fca5a5; font-size: 13px; padding: 10px;
+                border-radius: 18px; font-family: 'Segoe UI';
+            }
+            QPushButton:hover { background: rgba(239,68,68,0.35); color: white; }
+        """)
+        btn_quit.clicked.connect(quit_cb)
+        card_layout.addSpacing(4)
         card_layout.addWidget(btn_quit)
 
-        # --- TOGGLES ROW ---
-        toggles_frame = QFrame()
-        toggles_frame.setStyleSheet("background: transparent; border: none;")
-        toggles_layout = QHBoxLayout(toggles_frame)
-        toggles_layout.setAlignment(Qt.AlignCenter)
-        
+        # ── Toggle row ─────────────────────────────────────────────────
+        card_layout.addSpacing(6)
+        sep2 = QFrame(); sep2.setFrameShape(QFrame.HLine)
+        sep2.setStyleSheet("background: rgba(255,255,255,0.10); max-height: 1px; border: none;")
+        card_layout.addWidget(sep2)
+        card_layout.addSpacing(6)
+
         checkbox_style = """
             QCheckBox {
-                color: white;
-                font-family: 'Segoe UI';
-                font-size: 13px;
-                font-weight: 600;
-                spacing: 8px;
+                color: rgba(255,255,255,0.85); font-family: 'Segoe UI';
+                font-size: 12px; font-weight: 600; spacing: 7px;
             }
             QCheckBox::indicator {
-                width: 18px;
-                height: 18px;
-                border-radius: 4px;
-                border: 2px solid #475569;
-                background: transparent;
+                width: 16px; height: 16px; border-radius: 4px;
+                border: 2px solid #475569; background: transparent;
             }
-            QCheckBox::indicator:checked {
-                background: #10b981;
-                border-color: #10b981;
-            }
-            QCheckBox:hover {
-                color: white;
-            }
+            QCheckBox::indicator:checked { background: #10b981; border-color: #10b981; }
         """
+
+        toggles_layout = QHBoxLayout()
+        toggles_layout.setAlignment(Qt.AlignCenter)
+        toggles_layout.setSpacing(18)
 
         self.music_toggle = QCheckBox("MUSIC")
         self.music_toggle.setStyleSheet(checkbox_style)
         self.music_toggle.setCursor(self.custom_cursor)
-        
-        # === PERBAIKAN UTAMA DI SINI ===
-        # Gunakan variabel self.initial_music_on, JANGAN True manual
-        self.music_toggle.setChecked(self.initial_music_on) 
+        self.music_toggle.setChecked(self.initial_music_on)
         self.music_toggle.toggled.connect(music_cb)
 
         self.sfx_toggle = QCheckBox("SOUND FX")
         self.sfx_toggle.setStyleSheet(checkbox_style)
         self.sfx_toggle.setCursor(self.custom_cursor)
-        
-        # Gunakan variabel self.initial_sfx_on
         self.sfx_toggle.setChecked(self.initial_sfx_on)
         self.sfx_toggle.toggled.connect(sfx_cb)
-        # ===============================
+
+        self.colorblind_toggle = QCheckBox("COLOR-BLIND")
+        self.colorblind_toggle.setStyleSheet(checkbox_style)
+        self.colorblind_toggle.setCursor(self.custom_cursor)
+        self.colorblind_toggle.setChecked(self.initial_colorblind)
+        if self._cb_cb:
+            self.colorblind_toggle.toggled.connect(self._cb_cb)
 
         toggles_layout.addWidget(self.music_toggle)
-        toggles_layout.addSpacing(30)
         toggles_layout.addWidget(self.sfx_toggle)
+        toggles_layout.addWidget(self.colorblind_toggle)
+        card_layout.addLayout(toggles_layout)
 
-        card_layout.addSpacing(10)
-        card_layout.addWidget(toggles_frame)
-        
-        # Version
-        ver = QLabel("v6.0.0 — Dynamic Edition")
+        # ── Version & shortcuts hint ───────────────────────────────────
+        ver = QLabel("v6.5.0 — Dynamic Edition  ·  ESC / P to pause")
         ver.setAlignment(Qt.AlignCenter)
-        # --- PERBAIKAN DI SINI: Tambahkan border: none; ---
-        ver.setStyleSheet("color: white; font-size: 12px; margin-top: 10px; background: transparent; border: none;")
+        ver.setStyleSheet("color: rgba(255,255,255,0.45); font-size: 11px; "
+                          "margin-top: 8px; background: transparent; border: none;")
         card_layout.addWidget(ver)
 
         layout.addWidget(card)
@@ -1727,9 +1831,8 @@ class MainWindow(QMainWindow):
         # Sound Manager
         self.sound_manager = get_sound_manager()
         
-        # 2. LOAD SETTINGS DATA (Variable Only)
-        # Kita load dulu status on/off ke memory sebelum bikin UI
-        self.load_settings_variables() 
+        # 2. LOAD SETTINGS DATA
+        self.load_settings_variables()
 
         # --- SETUP STACKED WIDGET ---
         self.central_stack = QStackedWidget()
@@ -1742,8 +1845,13 @@ class MainWindow(QMainWindow):
             self.close,
             self.toggle_music,
             self.toggle_sfx,
-            # (Optional) Anda bisa memodifikasi WelcomeScreen untuk menerima status awal,
-            # tapi cara di bawah (sync_ui_settings) lebih mudah tanpa ubah class lain.
+            daily_callback=self.start_daily_challenge,
+            leaderboard_callback=self.show_leaderboard_menu,
+            achievements_callback=self.show_achievements_menu,
+            colorblind_callback=self.toggle_colorblind,
+            music_on=self.music_enabled,
+            sfx_on=self.sfx_enabled,
+            colorblind_on=self.colorblind_enabled,
         )
         self.central_stack.addWidget(self.welcome_screen)
         
@@ -1770,60 +1878,59 @@ class MainWindow(QMainWindow):
     # --- SETTINGS MANAGEMENT (FIXED) ---
 
     def load_settings_variables(self):
-        """Hanya memuat data JSON ke variabel self.music/sfx_enabled"""
+        """Load settings JSON into self variables."""
         settings_path = self.save_dir / "settings.json"
-        
-        # Default Values
-        self.music_enabled = True
-        self.sfx_enabled = True
+        self.music_enabled     = True
+        self.sfx_enabled       = True
+        self.colorblind_enabled = False
 
         if settings_path.exists():
             try:
                 with open(settings_path, 'r') as f:
                     data = json.load(f)
-                    self.music_enabled = data.get('music_enabled', True)
-                    self.sfx_enabled = data.get('sfx_enabled', True)
-                print(f"📂 Loaded Settings: Music={self.music_enabled}, SFX={self.sfx_enabled}")
+                    self.music_enabled      = data.get('music_enabled', True)
+                    self.sfx_enabled        = data.get('sfx_enabled', True)
+                    self.colorblind_enabled = data.get('colorblind_enabled', False)
+                print(f"📂 Loaded Settings: Music={self.music_enabled}, SFX={self.sfx_enabled}, CB={self.colorblind_enabled}")
             except Exception as e:
                 print(f"❌ Error reading settings file: {e}")
         else:
-            print("⚠️ No settings file, using defaults (ON)")
+            print("⚠️ No settings file, using defaults")
+
+        # Apply colorblind mode immediately on load
+        set_colorblind_mode(self.colorblind_enabled)
 
     def sync_ui_with_settings(self):
-        """Sinkronisasi Checkbox UI dengan variabel yang sudah di-load"""
+        """Sync checkbox UI state with loaded variables."""
         try:
-            # Block signal agar tidak memicu toggle_music/sfx saat kita set status awal
-            self.welcome_screen.music_toggle.blockSignals(True)
-            self.welcome_screen.sfx_toggle.blockSignals(True)
-            
-            # Set Checkbox state
-            self.welcome_screen.music_toggle.setChecked(self.music_enabled)
-            self.welcome_screen.sfx_toggle.setChecked(self.sfx_enabled)
-            
-            # Unblock signal
-            self.welcome_screen.music_toggle.blockSignals(False)
-            self.welcome_screen.sfx_toggle.blockSignals(False)
+            ws = self.welcome_screen
+            ws.music_toggle.blockSignals(True)
+            ws.sfx_toggle.blockSignals(True)
+            ws.colorblind_toggle.blockSignals(True)
+            ws.music_toggle.setChecked(self.music_enabled)
+            ws.sfx_toggle.setChecked(self.sfx_enabled)
+            ws.colorblind_toggle.setChecked(self.colorblind_enabled)
+            ws.music_toggle.blockSignals(False)
+            ws.sfx_toggle.blockSignals(False)
+            ws.colorblind_toggle.blockSignals(False)
         except Exception as e:
             print(f"⚠️ UI Sync Warning: {e}")
 
     def save_settings(self):
-        """Simpan status saat ini ke JSON"""
-        # Pastikan folder ada (safety check)
+        """Save current settings to JSON."""
         if not self.save_dir.exists():
             try:
                 self.save_dir.mkdir(parents=True, exist_ok=True)
             except:
                 pass
-
         data = {
-            'music_enabled': self.music_enabled,
-            'sfx_enabled': self.sfx_enabled
+            'music_enabled':      self.music_enabled,
+            'sfx_enabled':        self.sfx_enabled,
+            'colorblind_enabled': self.colorblind_enabled,
         }
-        
         try:
             with open(self.save_dir / "settings.json", 'w') as f:
                 json.dump(data, f)
-            print(f"💾 Settings Saved: {data}")
         except Exception as e:
             print(f"❌ Failed to save settings: {e}")
             
@@ -1958,11 +2065,8 @@ class MainWindow(QMainWindow):
             QPushButton {
                 background-color: rgba(255, 215, 0, 0.2);
                 border: 1px solid rgba(255, 215, 0, 0.5);
-                border-radius: 8px;
-                color: #FFD700;
-                font-size: 14px;
-                padding: 3px 8px;
-                min-width: 32px;
+                border-radius: 8px; color: #FFD700;
+                font-size: 14px; padding: 3px 8px; min-width: 32px;
             }
             QPushButton:hover { background-color: rgba(255, 215, 0, 0.4); }
         """)
@@ -1977,17 +2081,30 @@ class MainWindow(QMainWindow):
             QPushButton {
                 background-color: rgba(139, 92, 246, 0.25);
                 border: 1px solid rgba(139, 92, 246, 0.5);
-                border-radius: 8px;
-                color: #c4b5fd;
-                font-size: 14px;
-                padding: 3px 8px;
-                min-width: 32px;
+                border-radius: 8px; color: #c4b5fd;
+                font-size: 14px; padding: 3px 8px; min-width: 32px;
             }
             QPushButton:hover { background-color: rgba(139, 92, 246, 0.5); }
         """)
         self.ach_btn.setCursor(self.custom_hand_cursor)
         self.ach_btn.clicked.connect(self.show_achievements)
         hud_layout.addWidget(self.ach_btn)
+
+        # === Replay button ===
+        self.replay_btn = QPushButton("🎬")
+        self.replay_btn.setToolTip("Best Replays")
+        self.replay_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(14, 165, 233, 0.2);
+                border: 1px solid rgba(14, 165, 233, 0.4);
+                border-radius: 8px; color: #7dd3fc;
+                font-size: 14px; padding: 3px 8px; min-width: 32px;
+            }
+            QPushButton:hover { background-color: rgba(14, 165, 233, 0.4); }
+        """)
+        self.replay_btn.setCursor(self.custom_hand_cursor)
+        self.replay_btn.clicked.connect(self.show_replay_list)
+        hud_layout.addWidget(self.replay_btn)
 
         hud_layout.addSpacing(2)
 
@@ -2077,10 +2194,11 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(50, self._position_hud)
 
     def back_to_menu(self):
-        """Kembali ke menu utama, pause game dan simpan"""
+        """Return to main menu, pause game and save."""
         self.scene.timer.stop()
         self.scene.shot_timer.stop()
         self.scene.game_timer.stop()
+        self._save_replay_after_session()
         self.save_game()
         self.central_stack.setCurrentIndex(0)
 
@@ -2553,6 +2671,7 @@ class MainWindow(QMainWindow):
         self.scene.shot_timer.stop()
         self.scene.game_timer.stop()
         self.save_high_score_data()
+        self._save_replay_after_session()
 
         leaderboard = get_leaderboard(self.save_dir)
         stats = self.scene.score_mgr.get_stats()
@@ -2607,8 +2726,178 @@ class MainWindow(QMainWindow):
         self.central_stack.setCurrentIndex(1)
         QTimer.singleShot(50, self._position_hud)
 
+    def toggle_pause(self):
+        """Pause / resume — triggered by HUD button OR Esc/P keyboard shortcut."""
+        if not hasattr(self, 'scene'):
+            return
+        if self.scene.timer.isActive():
+            self.scene.timer.stop()
+            self.scene.shot_timer.pause()
+            self.scene.game_timer.pause()
+            self.sound_manager.pause_bgm()
+            # Show pause overlay hint on HUD button if it exists
+            if hasattr(self, 'menu_btn'):
+                self.menu_btn.setText("▶ RESUME  (P)")
+        else:
+            self.scene.timer.start()
+            self.scene.shot_timer.resume()
+            self.scene.game_timer.resume()
+            if self.music_enabled:
+                self.sound_manager.resume_bgm()
+            if hasattr(self, 'menu_btn'):
+                self.menu_btn.setText("🏠 MENU")
+
+    def toggle_colorblind(self, checked: bool):
+        """Toggle color-blind mode and rebuild all visible bubbles."""
+        self.colorblind_enabled = checked
+        set_colorblind_mode(checked)
+        self.save_settings()
+        # Rebuild all bubble visuals in-place if game is active
+        if hasattr(self, 'scene'):
+            for bubble in self.scene.bubbles:
+                # Remove old child items (symbol labels) then re-setup
+                for child in bubble.childItems():
+                    child.setParentItem(None)
+                bubble.setup_appearance()
+
+    # ── Menu-accessible Leaderboard / Achievement (from main menu) ───────────
+
+    def show_leaderboard_menu(self):
+        """Open leaderboard from the main menu (no game to pause)."""
+        dlg = LeaderboardDialog(self, current_score=0, current_level=1)
+        dlg.exec()
+
+    def show_achievements_menu(self):
+        """Open achievement browser from the main menu."""
+        dlg = AchievementDialog(self)
+        dlg.exec()
+
+    # ── Daily Challenge ───────────────────────────────────────────────────────
+
+    def start_daily_challenge(self):
+        """Start today's daily challenge grid."""
+        daily_mgr = get_daily_manager(self.save_dir)
+
+        # Reset scene then inject the daily grid
+        self.scene.reset_game()
+        self.scene.daily_mode  = True
+        self.scene.daily_shots = 0
+
+        try:
+            daily_grid = daily_mgr.start()
+            # Pad grid to ROWS if needed
+            while len(daily_grid) < ROWS:
+                daily_grid.append([None] * COLS)
+            self.scene.grid.grid = daily_grid
+            self.scene.create_bubbles_visuals()
+        except Exception as e:
+            print(f"Daily grid error: {e}")
+
+        # Update HUD to show shot cap
+        if hasattr(self, 'drop_label'):
+            self.drop_label.setText(f"📅 DAILY — {DAILY_SHOTS_CAP} shots")
+
+        self.scene.timer.start()
+        self.central_stack.setCurrentIndex(1)
+        QTimer.singleShot(50, self._position_hud)
+
+        # Connect daily shot-cap signal
+        daily_mgr.shots_remaining_changed.connect(self._on_daily_shots_changed)
+
+    def _on_daily_shots_changed(self, remaining: int):
+        if hasattr(self, 'drop_label'):
+            self.drop_label.setText(f"📅 SHOTS LEFT: {remaining}")
+        if remaining <= 0 and self.scene.daily_mode:
+            # Time up — end daily challenge
+            daily_mgr = get_daily_manager(self.save_dir)
+            daily_mgr.on_timeout(self.scene.daily_shots, self.scene.game_timer.elapsed)
+            self.scene.daily_mode = False
+            self.show_game_over()
+
+    # ── Replay ────────────────────────────────────────────────────────────────
+
+    def _save_replay_after_session(self):
+        """Called at game-over or back-to-menu to persist the replay."""
+        try:
+            recorder = self.scene.recorder
+            recorder.stop()
+            recorder.set_final_score(self.scene.score_mgr.score)
+            recorder.set_level(self.scene.level)
+            get_replay_manager(self.save_dir).save_replay(recorder)
+        except Exception as e:
+            print(f"Replay save error: {e}")
+
+    def show_replay_list(self):
+        """Show a simple dialog listing saved replays — pause game first."""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QScrollArea, QWidget
+        was_active = self.scene.timer.isActive()
+        if was_active:
+            self.scene.timer.stop()
+            self.scene.shot_timer.pause()
+            self.scene.game_timer.pause()
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Best Replays")
+        dlg.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        dlg.setAttribute(Qt.WA_TranslucentBackground)
+        dlg.setFixedSize(420, 480)
+
+        outer = QVBoxLayout(dlg)
+        outer.setContentsMargins(10, 10, 10, 10)
+        card = QFrame()
+        card.setStyleSheet("""
+            QFrame { background: #0a0e1a; border: 1px solid #1e2d45;
+                     border-radius: 18px; }
+        """)
+        vl = QVBoxLayout(card)
+        vl.setContentsMargins(22, 22, 22, 18)
+        vl.setSpacing(10)
+
+        title = QLabel("🎬  BEST REPLAYS")
+        title.setStyleSheet("color: #FFD700; font-size: 18px; font-weight: 900; border: none;")
+        vl.addWidget(title)
+
+        replays = get_replay_manager(self.save_dir).get_replays()
+        if not replays:
+            empty = QLabel("No replays saved yet.\nFinish a game session to record one.")
+            empty.setStyleSheet("color: #64748b; font-size: 13px; padding: 20px;")
+            empty.setAlignment(Qt.AlignCenter)
+            vl.addWidget(empty)
+        else:
+            for i, r in enumerate(replays, 1):
+                ts = r.get("timestamp", "")[:10]
+                score = r.get("score", 0)
+                level = r.get("level", 1)
+                shots = r.get("shots", 0)
+                row_lbl = QLabel(
+                    f"#{i}  Score: {score:,}  ·  Lv.{level}  ·  "
+                    f"{shots} shots  ·  {ts}"
+                )
+                row_lbl.setStyleSheet(
+                    "color: #e2e8f0; font-size: 12px; border: none; "
+                    "background: rgba(255,255,255,0.04); border-radius: 8px; padding: 8px;"
+                )
+                vl.addWidget(row_lbl)
+
+        vl.addStretch()
+        close_btn = QPushButton("✕  CLOSE")
+        close_btn.setStyleSheet("""
+            QPushButton { background: #1e293b; color: white; border-radius: 10px;
+                          padding: 10px; font-weight: bold; border: none; }
+            QPushButton:hover { background: #334155; }
+        """)
+        close_btn.clicked.connect(dlg.accept)
+        vl.addWidget(close_btn)
+        outer.addWidget(card)
+        dlg.exec()
+
+        if was_active:
+            self.scene.timer.start()
+            self.scene.shot_timer.resume()
+            self.scene.game_timer.resume()
+
     def resizeEvent(self, event):
-        """Trigger HUD repositioning saat window di-resize"""
+        """Trigger HUD repositioning on window resize."""
         super().resizeEvent(event)
         if hasattr(self, '_position_hud'):
             self._position_hud()
@@ -2617,6 +2906,7 @@ class MainWindow(QMainWindow):
         if self.central_stack.currentIndex() == 1:
             self.scene.shot_timer.stop()
             self.scene.game_timer.stop()
+            self._save_replay_after_session()
             self.save_game()
         event.accept()
 
