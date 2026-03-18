@@ -1,4 +1,5 @@
-# 🐯 Macan Bubble Shooter
+<div align="center">
+🐯 Macan Bubble Shooter
 
 A professional, full-featured bubble shooter game with a jungle/tiger theme built using PySide6. Features smooth animations, particle effects, and an immersive fullscreen experience.
 
@@ -6,9 +7,8 @@ A professional, full-featured bubble shooter game with a jungle/tiger theme buil
 ![PySide6](https://img.shields.io/badge/PySide6-6.0+-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-<img width="1365" height="767" alt="Screenshot 2026-02-22 034408" src="https://github.com/user-attachments/assets/c9ccb975-905c-47b1-9696-8dc50a9abd1c" />
-
-
+<img width="1365" height="767" alt="Screenshot 2026-03-18 073427" src="https://github.com/user-attachments/assets/718f2da3-8802-4852-b2f9-b59bd79a555f" />
+</div>
 
 
 ## ✨ Features
@@ -46,6 +46,16 @@ A professional, full-featured bubble shooter game with a jungle/tiger theme buil
 - **Restart Button**: Quick game restart
 - **Quit Button**: Save and exit
 - **Game Over Dialog**: Professional game over screen with final score
+
+### 📸 Screenshot
+<img width="1365" height="767" alt="Screenshot 2026-03-18 073427" src="https://github.com/user-attachments/assets/70155a67-6ea8-4674-b4cb-fc8e60cba25b" />
+
+<img width="1365" height="767" alt="Screenshot 2026-03-18 073345" src="https://github.com/user-attachments/assets/32f0cfbc-a584-470a-9c01-3e5b255cd14a" />
+
+<img width="1365" height="767" alt="Screenshot 2026-03-18 073419" src="https://github.com/user-attachments/assets/b0a596a1-8641-4d4c-bf6e-2f30ecc2f528" />
+
+
+
 
 ## 🚀 Installation
 
