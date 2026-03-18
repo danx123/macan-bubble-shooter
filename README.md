@@ -1,208 +1,375 @@
 <div align="center">
-🐯 Macan Bubble Shooter
 
-A professional, full-featured bubble shooter game with a jungle/tiger theme built using PySide6. Features smooth animations, particle effects, and an immersive fullscreen experience.
+# 🐯 Macan Bubble Shooter
 
-![Macan Bubble Shooter](https://img.shields.io/badge/Python-3.8+-blue.svg)
+### Dynamic Edition — v6.0.0
+
+A professional, full-featured bubble shooter game with a jungle/tiger theme built using PySide6.  
+Features smooth animations, particle effects, a timer-driven scoring engine, 35 achievements, and a fully immersive fullscreen experience.
+
+![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
 ![PySide6](https://img.shields.io/badge/PySide6-6.0+-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Version](https://img.shields.io/badge/Version-6.0.0-orange.svg)
 
 <img width="1365" height="767" alt="Screenshot 2026-03-18 073427" src="https://github.com/user-attachments/assets/718f2da3-8802-4852-b2f9-b59bd79a555f" />
+
 </div>
 
+---
 
-## ✨ Features
+## ✨ What's New in v6.0.0
 
-### 🎮 Gameplay
-- **Classic Bubble Shooter Mechanics**: Match 3 or more bubbles of the same color to pop them
-- **Tiger Paw Shooter**: Unique tiger paw-shaped shooter cannon with smooth angle control
-- **6 Vibrant Colors**: Colorful gradient bubbles with glow effects
-- **Match Detection**: Intelligent bubble matching and floating bubble removal
-- **Lives System**: 5 lives to complete the game
-- **Scoring System**: 
-  - 10 points per bubble in a match
-  - 2x multiplier for matches of 5+ bubbles
-  - 20 bonus points for each floating bubble removed
+| Area | Highlight |
+|---|---|
+| ⏱ **Timer System** | Per-shot countdown with speed multiplier (up to 3.0×) |
+| 💎 **Scoring Engine** | Combo chains, streak bonuses, animated score popups |
+| 🏅 **Achievements** | 35 unlockable achievements with persistent progress |
+| ⚠️ **Danger Zone** | 4-level visual warning when bubbles approach the shooter |
+| 🏆 **Leaderboard** | Local top-10 with full session stats |
+| 🌐 **Full English UI** | All interface text translated to English |
+
+
+
+---
+
+## 🎮 Features
+
+### Core Gameplay
+- **Classic bubble shooter mechanics** — match 3 or more bubbles of the same color to pop them
+- **Tiger paw shooter** — unique shaped cannon with smooth mouse-driven aiming
+- **6 premium bubble colors** — Ruby Red, Emerald Green, Sapphire Blue, Topaz Yellow, Amethyst Purple, Diamond Cyan
+- **Intelligent match detection** — BFS-based color matching with rainbow bubble wildcard support
+- **Floating bubble removal** — disconnected groups collapse automatically after each match
+- **Wall bouncing** — bubbles reflect off side walls with precise angle calculation
+- **Aim guide** — dotted aim line with wall-bounce prediction
+
+### ⏱ Timer & Speed System
+- Each shot has an **8-second countdown** (4 seconds in Rush Mode)
+- Fire quickly to earn a **speed multiplier** applied to your match score:
+
+  | Time remaining | Multiplier |
+  |---|---|
+  | > 7.0 s | **3.0×** |
+  | > 5.0 s | **2.5×** |
+  | > 3.0 s | **2.0×** |
+  | > 1.5 s | **1.5×** |
+  | ≤ 1.5 s | **1.0×** |
+
+- A **color-coded timer bar** sits below the arena: green → amber → red
+- Slow shots incur a small score penalty
+
+### 💎 Advanced Scoring
+- **Combo system** — consecutive matches build a combo multiplier (max 10×, +0.3× per level)
+- **Streak bonuses** — fixed payouts at 5, 7, 10, and 15-shot streaks
+- **Animated popups** — `+617 SUPER! COMBO ×5! ⚡2.5×` labels float upward and fade; pool capped at 3 simultaneous popups
+- **Drop scoring** — floating bubbles award batch points in a single event rather than one popup per bubble
+- **Rush Mode bonus** — extra base points awarded while Rush Mode is active
+
+### ⚠️ Danger Zone
+A four-level warning system activates as the bubble grid descends toward the shooter:
+
+| Level | Trigger | Scene Visual | HUD Pill |
+|---|---|---|---|
+| Safe | > 220 px | — | — |
+| Warning | ≤ 220 px | Pulsing amber line | `⚠ WARNING` |
+| Danger | ≤ 150 px | Orange line + red screen tint | `⚠ DANGER` |
+| Critical | ≤ 90 px | Red pulsing line + overlay + **"⚠ DANGER ZONE"** label | `⚠ CRITICAL` |
+
+All visuals pulse at ~25 fps and reset cleanly on new game.
+
+### 🏅 Achievement System
+35 achievements across five categories, tracked persistently between sessions:
+
+| Category | Count | Examples |
+|---|---|---|
+| 🏆 Score | 9 | Rookie → Legend (hidden) |
+| 💥 Combat | 9 | First Pops → Annihilator, Cluster Bomb |
+| ⚡ Skill | 13 | Triple Kill, On Fire!, Speed Shooter, Power Master |
+| ⏱ Time | 2 | Survivor (5 min), Endurance (10 min, hidden) |
+| 🌟 Special | 4 | First Blood, Precision, Never Give Up, Comeback King |
+
+- Hidden achievements are concealed until unlocked
+- Each unlock rewards bonus score instantly
+- A **slide-in toast notification** appears for 3.5 seconds in the top-right of the play area
+
+### 🏆 Leaderboard & Stats
+- **Local top-10 leaderboard** persisted to disk, accessible in-game at any time
+- Stats tracked per session: shots fired, bubbles popped, best combo, total play time
+- **Game Over screen** shows a full stats breakdown before offering Continue / New Game / Menu
+
+### 🔋 Power-Up System
+Five collectible power-ups dropped randomly after large matches:
+
+| Power | Effect |
+|---|---|
+| 💣 Bomb | Destroys a 3×3 area around the impact point |
+| ⚡ Laser | Clears an entire vertical column |
+| 🌈 Rainbow | Acts as a wildcard matching any color |
+| 🔥 Fireball | Penetrating shot with a 5×5 explosion radius |
+| ❄️ Freeze | Pauses the ceiling-drop counter for 5 shots |
 
 ### 🎨 Visual Design
-- **Fullscreen Immersive Experience**: Optimized for desktop displays
-- **Jungle Theme**: Dark jungle background with decorative leaves
-- **Smooth Animations**: Bubble shooting, collision, and popping effects
-- **Particle Effects**: Explosion particles when bubbles pop
-- **Gradient Bubbles**: Radial gradients with highlight and shadow effects
-- **Modern HUD**: Professional score, level, and lives display
+- **Fullscreen immersive layout** — game view scales with KeepAspectRatioByExpanding
+- **Custom wallpaper support** — place `bubble_scn.webp` / `bubble_bgn.webp` in the `ui/` folder
+- **Fallback procedural nebula** — generated star field with nebula clouds if no wallpaper is found
+- **Per-level background tinting** — overlay color shifts subtly each level
+- **Particle explosions** — 8-particle burst per popped bubble with gravity and opacity fade
+- **Meteor trail effect** — flying bubbles leave a short particle trail
+- **Cached graphics assets** — bubble textures generated once and saved to disk for fast startup
 
-### 💾 Save/Load System
-- **Auto-Save**: Game state automatically saved on exit
-- **Persistent Storage**: Saves to `AppData/Local/MacanBubbleShooter/`
-- **State Preservation**: Saves score, lives, level, and complete bubble grid layout
-- **Auto-Load**: Automatically loads previous game state on startup
+### 💾 Save / Load System
+- **Auto-save** on exit and on return to main menu
+- **Persistent state**: score, level, grid layout, shooter queue, power-up charges, play time, and stats
+- Storage path: `AppData/Local/MacanBubbleShooter6/saves/`
+- **Continue** from last save or **wipe** for a clean new game
 
-### 🎯 User Interface
-- **Score Display**: Real-time score tracking
-- **Level Indicator**: Current level display
-- **Lives Counter**: Heart-based lives indicator
-- **Pause Button**: Pause/resume gameplay
-- **Restart Button**: Quick game restart
-- **Quit Button**: Save and exit
-- **Game Over Dialog**: Professional game over screen with final score
-
-### 📸 Screenshot
-<img width="1365" height="767" alt="Screenshot 2026-03-18 073427" src="https://github.com/user-attachments/assets/70155a67-6ea8-4674-b4cb-fc8e60cba25b" />
-
-<img width="1365" height="767" alt="Screenshot 2026-03-18 073345" src="https://github.com/user-attachments/assets/32f0cfbc-a584-470a-9c01-3e5b255cd14a" />
-
-<img width="1365" height="767" alt="Screenshot 2026-03-18 073419" src="https://github.com/user-attachments/assets/b0a596a1-8641-4d4c-bf6e-2f30ecc2f528" />
-
-
-
+---
 
 ## 🚀 Installation
 
 ### Prerequisites
 - Python 3.8 or higher
-- PySide6
+- PySide6 6.0 or higher
 
 ### Setup
 
 1. **Clone the repository**
-```bash
-git clone https://github.com/danx123/macan-bubble-shooter.git
-cd macan-bubble-shooter
-```
+   ```bash
+   git clone https://github.com/danx123/macan-bubble-shooter.git
+   cd macan-bubble-shooter
+   ```
 
 2. **Install dependencies**
-```bash
-pip install PySide6
-```
+   ```bash
+   pip install PySide6
+   ```
 
 3. **Run the game**
-```bash
-python macan_bubble_shooter.py
-```
+   ```bash
+   python macan_bubble_shooter.py
+   ```
+
+---
 
 ## 🎮 How to Play
 
-1. **Aim**: Move your mouse to aim the tiger paw shooter
-2. **Shoot**: Click to shoot a bubble
-3. **Match**: Match 3 or more bubbles of the same color
-4. **Score**: Earn points by popping bubbles and removing floating groups
-5. **Survive**: Don't let the bubbles reach the bottom or run out of lives!
+1. **Aim** — move your mouse over the play area to rotate the cannon
+2. **Shoot** — left-click to fire; shoot quickly for a higher speed multiplier
+3. **Swap** — right-click to swap the current bubble with the next one in queue
+4. **Match** — connect 3 or more bubbles of the same color to pop them
+5. **Chain** — clearing a group may cause floating clusters to drop, earning bonus points
+6. **Survive** — don't let the bubble grid reach the shooter, and watch the Danger Zone indicators
 
 ### Controls
-- **Mouse Movement**: Aim the shooter
-- **Left Click**: Shoot bubble
-- **Pause Button**: Pause/resume game
-- **Restart Button**: Start a new game
-- **Quit Button**: Save and exit
+
+| Input | Action |
+|---|---|
+| Mouse movement | Aim the shooter |
+| Left click | Fire bubble |
+| Right click | Swap current / next bubble |
+| `🏠 MENU` button | Pause, auto-save, and return to main menu |
+| `🏆` button | Open leaderboard (game pauses) |
+| `🏅` button | Open achievement browser (game pauses) |
+
+---
 
 ## 🏗️ Project Structure
 
 ```
 macan-bubble-shooter/
 │
-├── macan_bubble_shooter.py    # Main game file
-├── README.md                   # This file
-└── AppData/Local/
-    └── MacanBubbleShooter/
-        └── save.json          # Auto-generated save file
+├── macan_bubble_shooter.py   # Main game — GameScene, GameView, MainWindow
+├── bubble_timer.py           # Shot timer, Rush Mode, game clock
+├── bubble_score.py           # ScoreManager, score popups, leaderboard
+├── bubble_achievement.py     # Achievement definitions, tracking, toast UI
+├── bubble_ui.py              # LeaderboardDialog, AchievementDialog, GameOverDialog
+├── bubble_fx.py              # Sound effects and background music manager
+├── bubble_gfx.py             # Graphics asset generation and disk cache
+├── bubble_power.py           # Power-up types, manager, and visual effects
+│
+├── ui/
+│   ├── bubble_scn.webp       # (optional) in-game scene wallpaper
+│   └── bubble_bgn.webp       # (optional) menu background wallpaper
+│
+├── CHANGELOG.md
+└── README.md
+
+AppData/Local/MacanBubbleShooter6/
+├── saves/
+│   ├── save_v6.json          # Current game state
+│   ├── highscore.json        # All-time high score
+│   ├── leaderboard.json      # Top-10 leaderboard entries
+│   └── achievements.json     # Achievement progress
+└── cache/
+    ├── bubble_0.png … bubble_5.png
+    ├── launcher.png
+    └── background_nebula.png
 ```
 
-## 🎨 Technical Features
+---
 
-### Graphics & Rendering
-- **Anti-aliasing**: Smooth graphics rendering
-- **Double buffering**: Flicker-free animations
-- **60 FPS**: Smooth 16ms update cycle
-- **Layered rendering**: Background, game objects, and particles on separate layers
-
-### Game Mechanics
-- **Hexagonal Grid**: Offset grid system for authentic bubble shooter layout
-- **Collision Detection**: Precise bubble-to-bubble collision
-- **Wall Bouncing**: Bubbles bounce off walls
-- **Neighbor Detection**: Smart neighbor finding for match detection
-- **Floating Detection**: Removes disconnected bubble groups
+## 🔧 Technical Details
 
 ### Architecture
-- **Model-View Architecture**: Clean separation of game logic and rendering
-- **Signal-Slot Pattern**: Event-driven HUD updates
-- **Scene Graph**: Efficient rendering with QGraphicsScene
-- **State Management**: Comprehensive game state tracking
 
+```
+macan_bubble_shooter.py
+├── bubble_timer.py        (no internal game dependencies)
+├── bubble_score.py        (no internal game dependencies)
+├── bubble_achievement.py  (no internal game dependencies)
+├── bubble_ui.py           (depends on bubble_score, bubble_achievement)
+├── bubble_fx.py           (unchanged from v5)
+├── bubble_gfx.py          (unchanged from v5)
+└── bubble_power.py        (unchanged from v5)
+```
+
+Each satellite module exposes a singleton accessor (`get_score_manager()`,
+`get_shot_timer()`, etc.) so shared state flows without explicit reference passing.
+
+### Rendering
+- **Anti-aliasing** and **SmoothPixmapTransform** on all drawing operations
+- **60 FPS** game loop (16 ms `QTimer`)
+- **ZValue layering**: background (−100) → bubbles (0) → aim line (50) → danger overlay (88–92) → score popups (400) → achievement toasts (600)
+- Scene coordinates are fixed; the `QGraphicsView` scales to the window via `KeepAspectRatioByExpanding`
+
+### Hexagonal Grid
+- Offset-column hex grid: odd rows are shifted right by one bubble radius
+- Neighbor lookup uses direction tables per row parity
+- BFS used for match detection, connectivity check, and floating cluster isolation
+
+### Signal / Slot Map
+
+| Signal (GameScene) | Connected slot (MainWindow) |
+|---|---|
+| `score_changed` | `update_score` |
+| `high_score_changed` | `update_high_score` |
+| `level_changed` | `update_level` |
+| `drop_counter_changed` | `update_drop_counter` |
+| `combo_changed` | `update_combo_label` |
+| `timer_tick` | `update_timer_label` |
+| `multiplier_changed` | `update_multiplier_display` |
+| `playtime_changed` | `update_playtime_label` |
+| `danger_level_changed` | `on_danger_level_changed` |
+| `next_bubble_changed` | `update_next_bubble_ui` |
+| `power_collected` | `on_power_collected` |
+| `power_updated` | `update_all_power_buttons` |
+| `game_over` | `show_game_over` |
+
+---
 
 ## 🔧 Customization
 
-### Modify Bubble Colors
-Edit the `BUBBLE_COLORS` constant in the code:
+### Bubble Colors
+Edit `BUBBLE_PALETTE` in `macan_bubble_shooter.py`:
 ```python
-BUBBLE_COLORS = [
-    (255, 100, 100),  # Red
-    (100, 255, 100),  # Green
-    (100, 100, 255),  # Blue
-    # Add more colors...
+BUBBLE_PALETTE = [
+    {"base": QColor(255, 69, 58), "light": QColor(255, 134, 124), "dark": QColor(160, 20, 10)},
+    # Add or replace entries here
 ]
 ```
 
-### Adjust Difficulty
-Modify constants:
+### Difficulty Tuning
 ```python
-INITIAL_LIVES = 5    # Starting lives
-ROWS = 10            # Number of bubble rows
-COLS = 12            # Number of bubble columns
+BUBBLE_RADIUS  = 22   # Bubble size in pixels
+ROWS           = 14   # Grid height
+COLS           = 20   # Grid width
+SHOTS_PER_DROP = 7    # Shots before the ceiling advances one row
 ```
 
-### Change Save Location
-Modify the save directory:
+### Timer Thresholds
+Edit `TIME_MULTIPLIER_TABLE` in `bubble_timer.py`:
 ```python
-self.save_dir = Path.home() / "AppData" / "Local" / "MacanBubbleShooter"
+TIME_MULTIPLIER_TABLE = [
+    (7.0, 3.0),   # Fire within 1 s → 3.0×
+    (5.0, 2.5),
+    (3.0, 2.0),
+    (1.5, 1.5),
+    (0.0, 1.0),
+]
 ```
 
-## 🐛 Known Issues
+### Custom Wallpaper
+Place any image as `ui/bubble_scn.webp` (in-game) or `ui/bubble_bgn.webp` (menu).
+The game falls back to the procedural nebula generator if these files are absent.
 
-- Ensure Python and PySide6 are properly installed
-- Game requires OpenGL support for smooth rendering
-- Save file uses JSON format - avoid manual editing
+### Custom Cursor
+Place `cursor.png` (24×24 px recommended) in
+`AppData/Local/MacanBubbleShooter6/cursor.png` to override the default crosshair.
 
-## 🚀 Future Enhancements
+---
 
-- [ ] Multiple difficulty levels
-- [ ] Power-ups (bomb, color change, aim guide)
-- [ ] High score leaderboard
-- [ ] Sound effects and background music
-- [ ] More themes (ocean, space, desert)
-- [ ] Progressive difficulty with advancing levels
-- [ ] Online multiplayer mode
-- [ ] Achievement system
+## 📸 Screenshots
+
+<img width="1365" height="767" alt="Gameplay" src="https://github.com/user-attachments/assets/70155a67-6ea8-4674-b4cb-fc8e60cba25b" />
+
+<img width="1365" height="767" alt="Danger Zone" src="https://github.com/user-attachments/assets/32f0cfbc-a584-470a-9c01-3e5b255cd14a" />
+
+<img width="1365" height="767" alt="Achievement Toast" src="https://github.com/user-attachments/assets/b0a596a1-8641-4d4c-bf6e-2f30ecc2f528" />
+
+---
+
+## 🐛 Known Issues & Troubleshooting
+
+| Issue | Resolution |
+|---|---|
+| Game won't launch | Ensure Python 3.8+ and `pip install PySide6` |
+| No sound | Place `.wav` files in the `bubble_sound/` folder (see `bubble_fx.py`) |
+| Save file corrupt | Delete `save_v6.json` from the saves folder; the game starts fresh |
+| Bubbles appear misaligned | Delete the `cache/` folder to force asset regeneration |
+| Black screen on startup | Verify OpenGL / GPU driver support for Qt |
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] Daily Challenge mode — fixed seed grid, global score compare
+- [ ] Boss Bubbles — large multi-hit bubbles requiring several shots
+- [ ] Obstacle / Shield Bubbles — immovable blockers that must be cleared around
+- [ ] Color-blind mode — shape overlays on every bubble color
+- [ ] Replay system — record and replay best sessions
+- [ ] Additional themes — ocean, space, desert
+- [ ] Online leaderboard integration
 - [ ] Custom bubble skin editor
+
+---
 
 ## 📝 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+
+---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome!
 
 1. Fork the project
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
+2. Create your feature branch: `git checkout -b feature/your-feature`
+3. Commit your changes: `git commit -m 'Add your feature'`
+4. Push to the branch: `git push origin feature/your-feature`
 5. Open a Pull Request
+
+---
 
 ## 👤 Author
 
-
 Project Link: [https://github.com/danx123/macan-bubble-shooter](https://github.com/danx123/macan-bubble-shooter)
+
+---
 
 ## 🙏 Acknowledgments
 
-- PySide6 framework for the excellent Qt bindings
-- The bubble shooter game genre pioneers
-- All contributors and testers
-
+- [PySide6](https://doc.qt.io/qtforpython/) — excellent Qt6 Python bindings
+- The bubble shooter genre pioneers for the timeless core mechanic
+- All contributors and playtesters
 
 ---
+
+<div align="center">
 
 Made with ❤️ and Python 🐍
 
 **Macan** means "Tiger" in Indonesian 🐯
+
+</div>
