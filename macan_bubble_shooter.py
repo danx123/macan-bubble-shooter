@@ -20,6 +20,21 @@ from bubble_power import (get_power_manager, PowerUpType, PowerUpBubble,
                           add_powerup, use_powerup, get_all_powers_info)
 from bubble_gfx import get_bubble_pixmap, get_launcher_pixmap, get_background_pixmap, has_custom_graphics, get_custom_cursor
 
+# === MODUL BARU ===
+from bubble_timer import (
+    ShotTimer, RushModeManager, GameTimer, TimerBar, CountdownFlash,
+    get_shot_timer, get_rush_manager, get_game_timer, reset_all_timers,
+    SHOT_TIME_LIMIT
+)
+from bubble_score import (
+    ScoreManager, ScoreEvent, spawn_score_popup,
+    get_score_manager, get_leaderboard
+)
+from bubble_achievement import (
+    get_achievement_manager, show_achievement_toast, ALL_ACHIEVEMENTS
+)
+from bubble_ui import LeaderboardDialog, AchievementDialog, GameOverDialog
+
 # --- Game Configuration ---
 BUBBLE_RADIUS = 22
 ROWS = 14
@@ -203,6 +218,7 @@ class Shooter(QGraphicsPolygonItem):
 class BubbleGrid:
     def __init__(self):
         self.grid = []
+        self.grid_offset_x = 0  # Offset horizontal agar grid di tengah scene lebar
         self.initialize_grid()
         
     def initialize_grid(self):
@@ -224,7 +240,7 @@ class BubbleGrid:
             
     def get_position(self, row, col):
         offset = BUBBLE_RADIUS if row % 2 == 1 else 0
-        x = col * BUBBLE_RADIUS * 2 + BUBBLE_RADIUS + offset
+        x = col * BUBBLE_RADIUS * 2 + BUBBLE_RADIUS + offset + self.grid_offset_x
         y = row * BUBBLE_RADIUS * 1.732 + BUBBLE_RADIUS
         return x, y
         
@@ -242,6 +258,178 @@ class BubbleGrid:
                     neighbors.append((nr, nc))
         return neighbors
 
+class DangerZoneOverlay:
+    """
+    Visual danger zone that appears when bubbles get too close to the shooter.
+
+    Features:
+    - Pulsing red horizontal line at the danger threshold
+    - Increasingly intense red screen overlay as danger grows
+    - "DANGER ZONE" text warning label
+    - 4 levels: hidden → warning (yellow) → danger (orange) → critical (red)
+    - Pulsing animation on the line and overlay
+    """
+
+    # Y-distance thresholds from shooter (pixels)
+    WARN_DIST     = 220   # Level 1 — yellow line appears
+    DANGER_DIST   = 150   # Level 2 — orange, overlay starts
+    CRITICAL_DIST = 90    # Level 3 — red pulsing, text label
+
+    def __init__(self, scene, scene_width: int, scene_height: int, shooter_y: float):
+        self.scene = scene
+        self.scene_width = scene_width
+        self.shooter_y = shooter_y
+
+        # Danger threshold Y position (shown as a horizontal line)
+        self._warn_y     = shooter_y - self.WARN_DIST
+        self._danger_y   = shooter_y - self.DANGER_DIST
+        self._critical_y = shooter_y - self.CRITICAL_DIST
+
+        # ── Warning line (dashed, spans full arena width) ──
+        self._line = QGraphicsRectItem(0, self._danger_y, scene_width, 3)
+        self._line.setBrush(QBrush(QColor(255, 160, 0, 180)))
+        self._line.setPen(QPen(Qt.NoPen))
+        self._line.setZValue(90)
+        self._line.setVisible(False)
+        scene.addItem(self._line)
+
+        # ── Screen overlay (semi-transparent red tint) ──
+        self._overlay = QGraphicsRectItem(0, 0, scene_width, scene_height)
+        self._overlay.setBrush(QBrush(QColor(255, 0, 0, 0)))
+        self._overlay.setPen(QPen(Qt.NoPen))
+        self._overlay.setZValue(88)
+        self._overlay.setVisible(False)
+        scene.addItem(self._overlay)
+
+        # ── Bottom edge highlight bar (critical only) ──
+        self._edge_bar = QGraphicsRectItem(0, self._critical_y, scene_width, 6)
+        self._edge_bar.setBrush(QBrush(QColor(255, 30, 30, 220)))
+        self._edge_bar.setPen(QPen(Qt.NoPen))
+        self._edge_bar.setZValue(91)
+        self._edge_bar.setVisible(False)
+        scene.addItem(self._edge_bar)
+
+        # ── "DANGER ZONE" text ──
+        self._label = QGraphicsTextItem("⚠ DANGER ZONE")
+        font = QFont("Segoe UI Black", 14, QFont.Black)
+        self._label.setFont(font)
+        self._label.setDefaultTextColor(QColor(255, 60, 60))
+        self._label.setZValue(92)
+        lw = self._label.boundingRect().width()
+        self._label.setPos(scene_width / 2 - lw / 2, self._critical_y - 30)
+        self._label.setVisible(False)
+        scene.addItem(self._label)
+
+        # Pulse animation state
+        self._pulse_frame = 0
+        self._pulse_timer = QTimer()
+        self._pulse_timer.setInterval(40)   # ~25fps pulse
+        self._pulse_timer.timeout.connect(self._pulse)
+
+        self._current_level = 0
+
+    def update_danger(self, bubbles: list):
+        """Call after every bubble attach. Determines danger level from lowest bubble."""
+        if not bubbles:
+            self._set_level(0)
+            return
+
+        lowest_y = max(b.y() for b in bubbles)
+        dist = self.shooter_y - lowest_y
+
+        if dist <= self.CRITICAL_DIST:
+            self._set_level(3)
+        elif dist <= self.DANGER_DIST:
+            self._set_level(2)
+        elif dist <= self.WARN_DIST:
+            self._set_level(1)
+        else:
+            self._set_level(0)
+
+    def _set_level(self, level: int):
+        if level == self._current_level:
+            return
+        self._current_level = level
+
+        if level == 0:
+            self._line.setVisible(False)
+            self._overlay.setVisible(False)
+            self._edge_bar.setVisible(False)
+            self._label.setVisible(False)
+            self._pulse_timer.stop()
+
+        elif level == 1:
+            # Warning — yellow/amber line only
+            self._line.setPos(0, self._warn_y)
+            self._line.setRect(0, 0, self.scene_width, 2)
+            self._line.setBrush(QBrush(QColor(255, 200, 0, 160)))
+            self._line.setVisible(True)
+            self._overlay.setVisible(False)
+            self._edge_bar.setVisible(False)
+            self._label.setVisible(False)
+            self._pulse_timer.start()
+
+        elif level == 2:
+            # Danger — orange line + faint overlay
+            self._line.setPos(0, self._danger_y)
+            self._line.setRect(0, 0, self.scene_width, 3)
+            self._line.setBrush(QBrush(QColor(255, 120, 0, 200)))
+            self._line.setVisible(True)
+            self._overlay.setRect(0, 0, self.scene_width, self.shooter_y)
+            self._overlay.setVisible(True)
+            self._edge_bar.setVisible(False)
+            self._label.setVisible(False)
+            self._pulse_timer.start()
+
+        elif level == 3:
+            # Critical — red pulsing line + overlay + edge bar + text
+            self._line.setPos(0, self._critical_y)
+            self._line.setRect(0, 0, self.scene_width, 5)
+            self._line.setBrush(QBrush(QColor(255, 40, 40, 230)))
+            self._line.setVisible(True)
+            self._overlay.setRect(0, 0, self.scene_width, self.shooter_y)
+            self._overlay.setVisible(True)
+            self._edge_bar.setVisible(True)
+            self._label.setVisible(True)
+            self._pulse_timer.start()
+
+    def _pulse(self):
+        """Animate pulsing opacity on all danger elements."""
+        self._pulse_frame += 1
+        t = self._pulse_frame * 0.12
+        # sin oscillation 0..1
+        import math
+        pulse = (math.sin(t) + 1.0) / 2.0   # 0.0 .. 1.0
+
+        level = self._current_level
+        if level >= 1:
+            line_alpha = int(80 + pulse * 160)
+            if level == 1:
+                self._line.setBrush(QBrush(QColor(255, 200, 0, line_alpha)))
+            elif level == 2:
+                self._line.setBrush(QBrush(QColor(255, 120, 0, line_alpha)))
+                ov_alpha = int(pulse * 28)
+                self._overlay.setBrush(QBrush(QColor(255, 80, 0, ov_alpha)))
+            elif level == 3:
+                self._line.setBrush(QBrush(QColor(255, 40, 40, line_alpha)))
+                ov_alpha = int(15 + pulse * 40)
+                self._overlay.setBrush(QBrush(QColor(255, 0, 0, ov_alpha)))
+                edge_alpha = int(120 + pulse * 120)
+                self._edge_bar.setBrush(QBrush(QColor(255, 30, 30, edge_alpha)))
+                # Pulse label opacity
+                self._label.setOpacity(0.5 + pulse * 0.5)
+
+    def remove(self):
+        """Clean up all items from scene."""
+        self._pulse_timer.stop()
+        for item in [self._line, self._overlay, self._edge_bar, self._label]:
+            try:
+                if item.scene():
+                    self.scene.removeItem(item)
+            except Exception:
+                pass
+
+
 class GameScene(QGraphicsScene):
     score_changed = Signal(int)
     high_score_changed = Signal(int)
@@ -252,11 +440,29 @@ class GameScene(QGraphicsScene):
     power_used = Signal(str)
     power_updated = Signal()
     game_over = Signal()
+    # === SINYAL BARU ===
+    combo_changed    = Signal(int)    # Combo count
+    timer_tick       = Signal(float)  # Sisa waktu tembak
+    multiplier_changed = Signal(float) # Speed multiplier
+    danger_level_changed = Signal(int) # 0-3
+    playtime_changed = Signal(str)    # "mm:ss"
+    achievement_earned = Signal(object)  # AchievementDef
     
     def __init__(self):
         super().__init__()
-        self.scene_width = 1200
-        self.scene_height = 800        
+        # Hitung ukuran grid aktual terlebih dulu
+        GRID_PADDING = 10
+        grid_width = int(COLS * BUBBLE_RADIUS * 2 + BUBBLE_RADIUS * 2 + GRID_PADDING * 2)
+        ROWS_HEIGHT = int(ROWS * BUBBLE_RADIUS * 1.732 + BUBBLE_RADIUS)
+        self.scene_height = ROWS_HEIGHT + 220
+
+        # FIX GEPENG: Perlebar scene_width ke aspect ratio 16:9 agar tidak distorsi
+        # Dengan KeepAspectRatio, scene harus proporsional dengan layar widescreen
+        self.scene_width = int(self.scene_height * (16 / 9))
+
+        # Simpan offset horizontal agar grid bubble tetap di TENGAH scene yang lebih lebar
+        self.grid_offset_x = (self.scene_width - grid_width) // 2
+
         self.setSceneRect(0, 0, self.scene_width, self.scene_height)
         
         self.score = 0
@@ -267,9 +473,10 @@ class GameScene(QGraphicsScene):
         self.setup_background()
         
         self.grid = BubbleGrid()
+        self.grid.grid_offset_x = self.grid_offset_x  # Sinkronkan offset ke grid
         self.bubbles = []
         self.shooter = Shooter()
-        self.shooter.setPos(self.scene_width / 2, self.scene_height - 150)
+        self.shooter.setPos(self.scene_width / 2, self.scene_height - 130)
         self.addItem(self.shooter)
         
         self.flying_bubble = None
@@ -292,6 +499,63 @@ class GameScene(QGraphicsScene):
         # === AIM LINE (Garis Aim) ===
         self.aim_line = None
         self.aim_bounce_line = None
+
+        # === SISTEM BARU: Timer, Score, Achievement ===
+        self._save_dir = Path.home() / "AppData" / "Local" / "MacanBubbleShooter6" / "saves"
+        self._save_dir.mkdir(parents=True, exist_ok=True)
+
+        # Score Manager
+        self.score_mgr = get_score_manager(self._save_dir)
+        self.score_mgr.score_updated.connect(self._on_score_updated)
+        self.score_mgr.combo_updated.connect(self.combo_changed.emit)
+        self.score_mgr.score_event.connect(self._on_score_event)
+        self.score_mgr.highscore_beaten.connect(self._on_highscore_beaten)
+
+        # Shot Timer
+        self.shot_timer = get_shot_timer()
+        self.shot_timer.tick.connect(self.timer_tick.emit)
+        self.shot_timer.tick.connect(self._update_timer_bar)
+        self.shot_timer.multiplier_changed.connect(self.multiplier_changed.emit)
+        self.shot_timer.time_up.connect(self._on_shot_time_up)
+
+        # Rush Mode Manager
+        self.rush_mgr = get_rush_manager()
+        self.rush_mgr.danger_level_changed.connect(self._on_danger_level_changed)
+        self.rush_mgr.rush_started.connect(self._on_rush_started)
+        self.rush_mgr.rush_ended.connect(self._on_rush_ended)
+
+        # Game Timer (total waktu bermain)
+        self.game_timer = get_game_timer()
+        self.game_timer.elapsed_changed.connect(self._on_elapsed_tick)
+
+        # Achievement Manager
+        self.ach_mgr = get_achievement_manager(self._save_dir)
+        self.ach_mgr.achievement_unlocked.connect(self._on_achievement_unlocked)
+
+        # Timer Bar visual di scene (di bawah shooter)
+        timer_bar_y = self.scene_height - 175
+        timer_bar_x = self.grid_offset_x
+        timer_bar_w = COLS * BUBBLE_RADIUS * 2 + BUBBLE_RADIUS * 2
+        self.timer_bar = TimerBar(self, timer_bar_x, timer_bar_y, timer_bar_w, 12)
+
+        # Countdown flash
+        self.countdown_flash = CountdownFlash(self, self.scene_width, self.scene_height)
+
+        # === DANGER ZONE SYSTEM ===
+        self._danger_zone = DangerZoneOverlay(self, self.scene_width, self.scene_height, self.shooter.y())
+        self._last_danger_level = 0
+
+        # Tracking state
+        self._no_miss_streak    = 0
+        self._speed_shot_streak = 0
+        self._last_shot_bounced = False
+        self._chain_count       = 0
+        self._was_in_rush       = False
+        self._current_shot_multiplier = 1.0
+
+        # Mulai shot timer untuk tembakan pertama
+        self.shot_timer.start(rush_mode=False)
+        self.game_timer.start()
     
     def setup_background(self):
         # 1. Hapus background lama jika ada (untuk reset)
@@ -383,6 +647,15 @@ class GameScene(QGraphicsScene):
         if self.shooting or self.flying_bubble:
             return        
         play_shoot()
+
+        # === Ambil multiplier dari shot timer sebelum di-stop ===
+        self._current_shot_multiplier = self.shot_timer.get_multiplier()
+        self._last_shot_bounced = False
+        self.shot_timer.stop()
+
+        # Update achievement tracking
+        self.score_mgr.on_shot_fired()
+        self.ach_mgr.on_shots(self.score_mgr.total_shots, self._no_miss_streak)
             
         self.shooting = True
         color = self.shooter.current_color
@@ -441,13 +714,19 @@ class GameScene(QGraphicsScene):
             new_x = self.flying_bubble.x() + self.bubble_vx
             new_y = self.flying_bubble.y() + self.bubble_vy
             
-            # 4. Pantulan Dinding (Wall Bounce)
-            if new_x - BUBBLE_RADIUS <= 0:
-                self.bubble_vx = abs(self.bubble_vx)  # Pantul ke kanan
-                new_x = BUBBLE_RADIUS
-            elif new_x + BUBBLE_RADIUS >= self.scene_width:
-                self.bubble_vx = -abs(self.bubble_vx)  # Pantul ke kiri
-                new_x = self.scene_width - BUBBLE_RADIUS
+            # 4. Pantulan Dinding (Wall Bounce) - dalam area grid, bukan seluruh scene
+            wall_left  = self.grid_offset_x + BUBBLE_RADIUS
+            wall_right = self.grid_offset_x + (COLS * BUBBLE_RADIUS * 2 + BUBBLE_RADIUS * 2) - BUBBLE_RADIUS
+            if new_x <= wall_left:
+                overflow = wall_left - new_x
+                new_x = wall_left + overflow
+                self.bubble_vx = abs(self.bubble_vx)
+                self._last_shot_bounced = True   # Track pantulan
+            elif new_x >= wall_right:
+                overflow = new_x - wall_right
+                new_x = wall_right - overflow
+                self.bubble_vx = -abs(self.bubble_vx)
+                self._last_shot_bounced = True   # Track pantulan
                 
             self.flying_bubble.setPos(new_x, new_y)
             
@@ -566,11 +845,22 @@ class GameScene(QGraphicsScene):
         if self.check_game_over_condition():
             self.game_over.emit()
 
-        self.shooting = False 
+        self.shooting = False
+
+        # === Restart shot timer untuk tembakan berikutnya ===
+        rush_mode = self.rush_mgr.rush_active
+        self.shot_timer.start(rush_mode=rush_mode)
+
+        # === Evaluasi rush mode ===
+        self.rush_mgr.evaluate(self.bubbles, self.scene_height, self.shooter.y())
+
+        # === Update Danger Zone visual ===
+        self._danger_zone.update_danger(self.bubbles)
+        # Sync HUD danger label with DangerZone level
+        self.danger_level_changed.emit(self._danger_zone._current_level)
 
     def apply_bomb_effect(self, center_row, center_col):
         destroyed = []
-
         for dr in range(-1, 2):
             for dc in range(-1, 2):
                 r, c = center_row + dr, center_col + dc
@@ -581,11 +871,11 @@ class GameScene(QGraphicsScene):
                         self.remove_bubble_visual(r, c)
 
         x, y = self.grid.get_position(center_row, center_col)
-        PowerUpVisualEffect.create_explosion_effect(
-            self, x, y, BUBBLE_RADIUS * 3, QColor(255, 69, 0)
-        )
-
-        self.add_score(len(destroyed) * 15)
+        PowerUpVisualEffect.create_explosion_effect(self, x, y, BUBBLE_RADIUS * 3, QColor(255, 69, 0))
+        popup_x = self.grid_offset_x + (COLS * BUBBLE_RADIUS * 2) / 2
+        popup_y = self.scene_height * 0.4
+        self.score_mgr.on_powerup_effect(len(destroyed), 15, popup_x, popup_y, "💣 BOMB!")
+        self.ach_mgr.on_power_used('bomb')
         play_burst()
         self.remove_floating_bubbles()
 
@@ -598,17 +888,16 @@ class GameScene(QGraphicsScene):
                 self.remove_bubble_visual(row, col)
 
         x, _ = self.grid.get_position(0, col)
-        PowerUpVisualEffect.create_laser_effect(
-            self, x, 0, self.scene_height - 200, QColor(0, 255, 255)
-        )
-
-        self.add_score(len(destroyed) * 20)
+        PowerUpVisualEffect.create_laser_effect(self, x, 0, self.scene_height - 200, QColor(0, 255, 255))
+        popup_x = self.grid_offset_x + (COLS * BUBBLE_RADIUS * 2) / 2
+        popup_y = self.scene_height * 0.4
+        self.score_mgr.on_powerup_effect(len(destroyed), 20, popup_x, popup_y, "⚡ LASER!")
+        self.ach_mgr.on_power_used('laser')
         play_clear()
         self.remove_floating_bubbles()
 
     def apply_fireball_effect(self, center_row, center_col):
         destroyed = []
-
         for dr in range(-2, 3):
             for dc in range(-2, 3):
                 r, c = center_row + dr, center_col + dc
@@ -619,26 +908,93 @@ class GameScene(QGraphicsScene):
                         self.remove_bubble_visual(r, c)
 
         x, y = self.grid.get_position(center_row, center_col)
-        PowerUpVisualEffect.create_explosion_effect(
-            self, x, y, BUBBLE_RADIUS * 5, QColor(255, 140, 0)
-        )
-
-        self.add_score(len(destroyed) * 25)
+        PowerUpVisualEffect.create_explosion_effect(self, x, y, BUBBLE_RADIUS * 5, QColor(255, 140, 0))
+        popup_x = self.grid_offset_x + (COLS * BUBBLE_RADIUS * 2) / 2
+        popup_y = self.scene_height * 0.4
+        self.score_mgr.on_powerup_effect(len(destroyed), 25, popup_x, popup_y, "🔥 FIREBALL!")
+        self.ach_mgr.on_power_used('fireball')
         play_combo()
         self.remove_floating_bubbles()
 
     def add_score(self, points):
-        self.score += points
+        """Legacy helper — tambah skor via score_mgr agar konsisten."""
+        # Pakai ScoreManager sebagai single source of truth
+        if points > 0:
+            evt = ScoreEvent(points, 1.0, 1, "", 0, 0, QColor(180, 255, 180))
+            self.score_mgr._add_score(points)
+        # Sync score lama agar backward-compatible
+        self.score = self.score_mgr.score
         if self.score > self.high_score:
             self.high_score = self.score
             self.high_score_changed.emit(self.high_score)
         self.score_changed.emit(self.score)
 
+    def _on_score_updated(self, new_score: int):
+        """Callback dari ScoreManager saat score berubah."""
+        self.score = new_score
+        if new_score > self.high_score:
+            self.high_score = new_score
+            self.high_score_changed.emit(self.high_score)
+        self.score_changed.emit(new_score)
+
+    def _on_highscore_beaten(self, val: int):
+        self.high_score = val
+        self.high_score_changed.emit(val)
+
+    def _on_score_event(self, event):
+        """Tampilkan popup skor di scene."""
+        spawn_score_popup(self, event)
+
+    def _update_timer_bar(self, remaining: float):
+        """Update visual timer bar."""
+        if hasattr(self, 'timer_bar'):
+            progress = self.shot_timer.get_progress()
+            mult = self.shot_timer.get_multiplier()
+            self.timer_bar.update(progress, mult)
+            # Flash saat waktu < 2 detik
+            if remaining <= 2.0 and remaining > 1.9:
+                self.countdown_flash.flash("2", QColor(255, 200, 50))
+            elif remaining <= 1.0 and remaining > 0.9:
+                self.countdown_flash.flash("1", QColor(255, 80, 80))
+
+    def _on_shot_time_up(self):
+        """Penalti saat waktu tembak habis."""
+        # Kurangi score sebagai penalti kecil
+        penalty = 50
+        self.score_mgr._add_score(-penalty)
+        self.countdown_flash.flash("SLOW!", QColor(255, 60, 60))
+
+    def _on_danger_level_changed(self, level: int):
+        self.danger_level_changed.emit(level)
+        # Sync danger zone overlay with rush manager level
+        # (DangerZoneOverlay has its own evaluation, this keeps HUD in sync)
+
+    def _on_rush_started(self):
+        self._was_in_rush = True
+        self.countdown_flash.flash("RUSH!", QColor(255, 80, 0))
+
+    def _on_rush_ended(self):
+        if self._was_in_rush:
+            self.ach_mgr.on_rush_survived()
+            self._was_in_rush = False
+
+    def _on_elapsed_tick(self, seconds: int):
+        self.playtime_changed.emit(self.game_timer.format())
+        self.ach_mgr.on_survive_time(seconds)
+
+    def _on_achievement_unlocked(self, ach_def):
+        """Show toast dan emit signal ke MainWindow."""
+        show_achievement_toast(self, ach_def, self.scene_width)
+        # Tambah reward score
+        if ach_def.reward_score > 0:
+            self.score_mgr._add_score(ach_def.reward_score)
+        self.achievement_earned.emit(ach_def)
+
     def check_matches(self, row, col):
         color = self.grid.grid[row][col]
         matched = set()
         self.find_matching(row, col, color, matched)
-        
+
         if len(matched) >= 3:
             play_clear()
             if len(matched) >= 6:
@@ -648,18 +1004,44 @@ class GameScene(QGraphicsScene):
             if power_type:
                 add_powerup(power_type)
                 self.power_collected.emit(power_type)
-            
-            points = len(matched) * 10 + (self.level * 5)
-            self.add_score(points)
-            self.score_changed.emit(self.score)
-            
+
+            # === Scoring via ScoreManager (baru) ===
+            mx, my = self.grid.get_position(row, col)
+            mult = getattr(self, '_current_shot_multiplier', 1.0)
+            bounced = getattr(self, '_last_shot_bounced', False)
+            rush_bonus = self.rush_mgr.get_score_bonus()
+
+            self.score_mgr.on_match(
+                match_size=len(matched),
+                time_multiplier=mult,
+                was_bounced=bounced,
+                x=mx, y=my,
+                rush_bonus=rush_bonus,
+            )
+
+            # Achievement tracking
+            self._no_miss_streak += 1
+            if mult >= 2.8:
+                self._speed_shot_streak += 1
+                self.ach_mgr.on_speed_shot(self._speed_shot_streak, mult)
+            else:
+                self._speed_shot_streak = 0
+
+            self.ach_mgr.on_pop(self.score_mgr.total_pops, len(matched))
+            self.ach_mgr.on_combo(self.score_mgr.combo)
+            self.ach_mgr.on_streak(self.score_mgr.streak)
+            self.ach_mgr.on_score(self.score_mgr.score)
+
             for r, c in matched:
                 self.grid.grid[r][c] = None
                 self.remove_bubble_visual(r, c)
-                        
+
             self.remove_floating_bubbles()
             self.check_level_up()
             return True
+
+        # No match — reset no-miss streak
+        self._no_miss_streak = 0
         return False
 
     def remove_bubble_visual(self, r, c):
@@ -703,9 +1085,11 @@ class GameScene(QGraphicsScene):
                 self.addItem(bubble)
 
     def check_level_up(self):
-        if self.score >= self.level_threshold * self.level:
+        if self.score_mgr.score >= self.level_threshold * self.level:
             self.level += 1
+            self.score_mgr.set_level(self.level)
             self.level_changed.emit(self.level)
+            self.ach_mgr.on_level(self.level)
             self.update_background_color()
 
     def find_matching(self, row, col, color, matched):
@@ -729,45 +1113,63 @@ class GameScene(QGraphicsScene):
         for col in range(len(self.grid.grid[0])):
             if self.grid.grid[0][col] is not None:
                 self.find_connected(0, col, connected)
-                
+
         dropped_count = 0
+        # Posisi popup di tengah horizontal arena, sepertiga atas scene
+        popup_x = self.grid_offset_x + (COLS * BUBBLE_RADIUS * 2) / 2
+        popup_y = self.scene_height * 0.35
+
         for row in range(len(self.grid.grid)):
             for col in range(len(self.grid.grid[row])):
                 if self.grid.grid[row][col] is not None and (row, col) not in connected:
                     self.grid.grid[row][col] = None
                     self.remove_bubble_visual(row, col)
-                    self.add_score(20)
                     dropped_count += 1
-        
+
+        if dropped_count > 0:
+            self.score_mgr.on_drops(dropped_count, popup_x, popup_y)
+            self.ach_mgr.on_drop(self.score_mgr._total_drops)
+
         if dropped_count >= 3:
             play_combo()
-            
-        self.score_changed.emit(self.score)
+            self._chain_count += 1
+            self.ach_mgr.on_chain_reaction(self._chain_count)
+        else:
+            self._chain_count = 0
+
+        self.score_changed.emit(self.score_mgr.score)
     
     def check_and_drop_neighbors(self, impact_row, impact_col):
         neighbors = self.grid.get_neighbors(impact_row, impact_col)
-        
+        total_dropped = 0
+        last_x, last_y = self.grid.get_position(impact_row, impact_col)
+
         for nr, nc in neighbors:
             if self.grid.grid[nr][nc] is not None:
                 connected = set()
                 for col in range(len(self.grid.grid[0])):
                     if self.grid.grid[0][col] is not None:
                         self.find_connected(0, col, connected)
-                
+
                 if (nr, nc) not in connected:
                     to_drop = set()
                     self.find_connected_cluster(nr, nc, to_drop)
-                    
+
                     for dr, dc in to_drop:
                         if self.grid.grid[dr][dc] is not None:
+                            gx, gy = self.grid.get_position(dr, dc)
+                            last_x, last_y = gx, gy
                             self.grid.grid[dr][dc] = None
                             self.remove_bubble_visual(dr, dc)
-                            self.add_score(20)
-                    
-                    if len(to_drop) >= 3:
-                        play_combo()
-                    
-                    self.score_changed.emit(self.score)
+                            total_dropped += 1
+
+        # Satu popup drop di akhir, bukan per-bubble
+        if total_dropped > 0:
+            self.score_mgr.on_drops(total_dropped, last_x, last_y)
+            self.ach_mgr.on_drop(self.score_mgr._total_drops)
+            if total_dropped >= 3:
+                play_combo()
+            self.score_changed.emit(self.score_mgr.score)
     
     def find_connected_cluster(self, row, col, cluster):
         if (row, col) in cluster:
@@ -802,12 +1204,14 @@ class GameScene(QGraphicsScene):
         if power_type == PowerUpType.FREEZE:
             self.freeze_shots_remaining = 5
             PowerUpVisualEffect.create_freeze_effect(self, self.sceneRect())
+            self.ach_mgr.on_power_used('freeze')
             play_combo()
 
         elif power_type == PowerUpType.RAINBOW:
             self.shooter.current_color = -1
             self.shooter.update_loaded_bubble_visual()
             self.active_power = None
+            self.ach_mgr.on_power_used('rainbow')
             play_combo()
 
         return True
@@ -821,6 +1225,7 @@ class GameScene(QGraphicsScene):
         
     def reset_game(self):
         self.grid.initialize_grid()
+        self.grid.grid_offset_x = self.grid_offset_x
         self.create_bubbles_visuals()
         self.score = 0
         self.shots_until_drop = SHOTS_PER_DROP
@@ -836,10 +1241,39 @@ class GameScene(QGraphicsScene):
         self.level_changed.emit(self.level)
         self.update_background_color()
         self.clear_aim_line()
-    
-    # === AIM ASSIST METHODS ===
+
+        # === Reset semua sistem baru ===
+        self.score_mgr.reset()
+        reset_all_timers()
+        # Re-bind setelah reset singleton
+        self.shot_timer = get_shot_timer()
+        self.shot_timer.tick.connect(self.timer_tick.emit)
+        self.shot_timer.tick.connect(self._update_timer_bar)
+        self.shot_timer.multiplier_changed.connect(self.multiplier_changed.emit)
+        self.shot_timer.time_up.connect(self._on_shot_time_up)
+
+        self.rush_mgr = get_rush_manager()
+        self.rush_mgr.danger_level_changed.connect(self._on_danger_level_changed)
+        self.rush_mgr.rush_started.connect(self._on_rush_started)
+        self.rush_mgr.rush_ended.connect(self._on_rush_ended)
+
+        self.game_timer = get_game_timer()
+        self.game_timer.elapsed_changed.connect(self._on_elapsed_tick)
+        self.game_timer.start()
+
+        self._no_miss_streak    = 0
+        self._speed_shot_streak = 0
+        self._last_shot_bounced = False
+        self._chain_count       = 0
+        self._was_in_rush       = False
+        self._current_shot_multiplier = 1.0
+
+        self.shot_timer.start(rush_mode=False)
+
+        # === Reset Danger Zone ===
+        self._danger_zone.update_danger([])   # clears all danger visuals
     def update_aim_line(self, angle):
-        """Update garis aim dengan pantulan"""
+        """Update garis aim dengan pantulan - presisi di kedua dinding"""
         self.clear_aim_line()
         
         if self.shooting or self.flying_bubble:
@@ -853,26 +1287,28 @@ class GameScene(QGraphicsScene):
         dx = math.cos(rad)
         dy = -math.sin(rad)
         
-        max_distance = 1000
-        step = 5
+        max_distance = 1200
+        step = 8  # Langkah lebih besar untuk performa lebih baik
         
         points = [(start_x, start_y)]
         current_x, current_y = start_x, start_y
         current_dx, current_dy = dx, dy
-        bounced = False
         
         for _ in range(int(max_distance / step)):
             next_x = current_x + current_dx * step
             next_y = current_y + current_dy * step
             
-            if next_x - BUBBLE_RADIUS <= 0:
-                next_x = BUBBLE_RADIUS
+            # Bounce dalam batas grid (simetris kiri-kanan)
+            wall_left  = self.grid_offset_x + BUBBLE_RADIUS
+            wall_right = self.grid_offset_x + (COLS * BUBBLE_RADIUS * 2 + BUBBLE_RADIUS * 2) - BUBBLE_RADIUS
+            if next_x <= wall_left:
+                overflow = wall_left - next_x
+                next_x = wall_left + overflow
                 current_dx = abs(current_dx)
-                bounced = True
-            elif next_x + BUBBLE_RADIUS >= self.scene_width:
-                next_x = self.scene_width - BUBBLE_RADIUS
+            elif next_x >= wall_right:
+                overflow = next_x - wall_right
+                next_x = wall_right - overflow
                 current_dx = -abs(current_dx)
-                bounced = True
             
             if next_y - BUBBLE_RADIUS <= 0:
                 points.append((next_x, BUBBLE_RADIUS))
@@ -893,19 +1329,15 @@ class GameScene(QGraphicsScene):
             current_x, current_y = next_x, next_y
         
         if len(points) >= 2:
-            # Gunakan DotLine agar lebih terlihat seperti guide game modern
-            # Warna putih dengan transparansi 150 (sedikit lebih terang dari sebelumnya)
             pen = QPen(QColor(255, 255, 255, 150), 3, Qt.DotLine)
             
+            self.aim_line = []
             for i in range(len(points) - 1):
                 line = QGraphicsLineItem(points[i][0], points[i][1], 
                                         points[i+1][0], points[i+1][1])
                 line.setPen(pen)
-                line.setZValue(50) # Pastikan di atas background tapi di bawah UI
+                line.setZValue(50)
                 self.addItem(line)
-                
-                if not self.aim_line:
-                    self.aim_line = []
                 self.aim_line.append(line)
     
     def clear_aim_line(self):
@@ -936,7 +1368,21 @@ class GameView(QGraphicsView):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scene_ref = scene
         self.setStyleSheet("border: none; background: transparent;")
+        self.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         
+        # FIX AIM LAG: Throttle aim update agar tidak dipanggil tiap pixel
+        self._last_aim_angle = None
+        self._aim_timer = QTimer()
+        self._aim_timer.setSingleShot(True)
+        self._aim_timer.setInterval(16)  # ~60fps max untuk aim line update
+        self._aim_timer.timeout.connect(self._do_aim_update)
+        self._pending_angle = None
+        
+    def _do_aim_update(self):
+        """Lakukan update aim line yang sudah di-throttle"""
+        if self._pending_angle is not None:
+            self.scene_ref.update_aim_line(self._pending_angle)
+            
     def mouseMoveEvent(self, event):
         pos = self.mapToScene(event.pos())
         shooter_pos = self.scene_ref.shooter.pos()
@@ -946,11 +1392,35 @@ class GameView(QGraphicsView):
         # Batasi agar tidak error saat kursor sejajar/di bawah shooter
         if dy > 0:
             angle = math.degrees(math.atan2(dy, dx))
-            # 1. Putar shooter
-            self.scene_ref.shooter.set_angle(angle)
-            # 2. Update garis aim (INI YANG HILANG SEBELUMNYA)
-            self.scene_ref.update_aim_line(self.scene_ref.shooter.angle)
+            clamped_angle = max(15, min(165, angle))
             
+            # 1. Putar shooter langsung (smooth, tidak di-throttle)
+            self.scene_ref.shooter.set_angle(angle)
+            
+            # 2. Update aim line dengan throttle - hanya jika sudut berubah > 0.3 derajat
+            if self._last_aim_angle is None or abs(clamped_angle - self._last_aim_angle) > 0.3:
+                self._last_aim_angle = clamped_angle
+                self._pending_angle = clamped_angle
+                # Restart timer (debounce) - update setelah mouse berhenti sebentar
+                if not self._aim_timer.isActive():
+                    self._aim_timer.start()
+            
+    def resizeEvent(self, event):
+        """Auto-fit scene ke ukuran view saat window di-resize / fullscreen"""
+        super().resizeEvent(event)
+        if self.scene_ref:
+            self.fitInView(self.scene_ref.sceneRect(), Qt.KeepAspectRatioByExpanding)
+
+    def showEvent(self, event):
+        """Fit saat pertama kali ditampilkan"""
+        super().showEvent(event)
+        if self.scene_ref:
+            self.fitInView(self.scene_ref.sceneRect(), Qt.KeepAspectRatioByExpanding)
+        # Trigger HUD repositioning via parent
+        parent = self.parent()
+        if parent and hasattr(parent.parent() if parent else None, '_position_hud'):
+            parent.parent()._position_hud()
+
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.scene_ref.shoot_bubble(self.scene_ref.shooter.angle)
@@ -1142,7 +1612,7 @@ class WelcomeScreen(QWidget):
                 background: rgba(239, 68, 68, 0.2);
                 border: 1px solid rgba(239, 68, 68, 0.5);
                 color: #fca5a5;
-                font-size: 14px;
+                font-size: 13px;
                 padding: 12px;
                 border-radius: 20px;
             }
@@ -1214,7 +1684,7 @@ class WelcomeScreen(QWidget):
         card_layout.addWidget(toggles_frame)
         
         # Version
-        ver = QLabel("v4.0.0 Dynamic Edition")
+        ver = QLabel("v6.0.0 — Dynamic Edition")
         ver.setAlignment(Qt.AlignCenter)
         # --- PERBAIKAN DI SINI: Tambahkan border: none; ---
         ver.setStyleSheet("color: white; font-size: 12px; margin-top: 10px; background: transparent; border: none;")
@@ -1369,107 +1839,183 @@ class MainWindow(QMainWindow):
             self.sound_manager.pause_bgm()
         
     def setup_game_ui(self):
-        """Membuat layout game (HUD + Scene View)"""
-        # Background container game
-        self.game_container.setStyleSheet("background-color: #05100a;")
-    
-        # Gunakan Stacked Layout agar HUD bisa "mengambang" di atas Game View
-        # Namun untuk kemudahan, kita tetap pakai VBox tapi dengan style transparan
-        main_layout = QVBoxLayout(self.game_container)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
-    
-        # --- HUD (HEADS UP DISPLAY) ---
-        hud_container = QWidget()
-        # Gradient transparan ke hitam agar teks terbaca tapi tidak menutupi game total
-        hud_container.setStyleSheet("""
-            QWidget {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0,0,0,0.8), stop:1 rgba(0,0,0,0));
-            }
-        """)
-        hud_container.setFixedHeight(80) # Tinggi fix
-    
-        hud_layout = QHBoxLayout(hud_container)
-        hud_layout.setContentsMargins(20, 10, 20, 20)
-        hud_layout.setSpacing(10)
+        """Membuat layout game - GameView fullscreen, HUD overlay di atasnya"""
+        self.game_container.setStyleSheet("background-color: #000000;")
 
-        # Style untuk "Pills" (Kotak informasi)
+        self.scene = GameScene()
+        self.view = GameView(self.scene)
+        self.view.setParent(self.game_container)
+
+        # === LAYER 1: HUD overlay ===
+        self.hud_overlay = QWidget(self.game_container)
+        self.hud_overlay.setAttribute(Qt.WA_TranslucentBackground)
+        self.hud_overlay.setStyleSheet("background: transparent;")
+
+        hud_layout = QHBoxLayout(self.hud_overlay)
+        hud_layout.setContentsMargins(6, 4, 6, 4)
+        hud_layout.setSpacing(4)
+
+        # Style pill
         pill_style = """
             QLabel {
-                background-color: rgba(255, 255, 255, 0.1);
-                border: 1px solid rgba(255, 255, 255, 0.15);
-                border-radius: 15px;
-                padding: 5px 15px;
+                background-color: rgba(0, 0, 0, 0.72);
+                border: 1px solid rgba(255, 255, 255, 0.18);
+                border-radius: 10px;
+                padding: 3px 8px;
                 color: white;
                 font-family: 'Segoe UI';
                 font-weight: bold;
-                font-size: 14px;
+                font-size: 11px;
+            }
+        """
+        combo_pill_style = """
+            QLabel {
+                background-color: rgba(255, 140, 0, 0.8);
+                border: 1px solid rgba(255, 200, 50, 0.6);
+                border-radius: 10px;
+                padding: 3px 8px;
+                color: white;
+                font-family: 'Segoe UI Black';
+                font-weight: 900;
+                font-size: 11px;
+            }
+        """
+        timer_pill_style = """
+            QLabel {
+                background-color: rgba(16, 185, 129, 0.75);
+                border: 1px solid rgba(52, 211, 153, 0.6);
+                border-radius: 10px;
+                padding: 3px 8px;
+                color: white;
+                font-family: 'Segoe UI';
+                font-weight: bold;
+                font-size: 11px;
             }
         """
 
-        # Label Components dengan HTML formatting untuk warna ganda
-        self.high_score_label = QLabel("🏆 BEST <span style='color:#00FF00;'>0</span>")
+        self.high_score_label = QLabel("🏆 BEST: 0")
         self.high_score_label.setStyleSheet(pill_style)
-    
-        self.score_label = QLabel("💎 SCORE <span style='color:#FFD700;'>0</span>")
+
+        self.score_label = QLabel("💎 SCORE: 0")
         self.score_label.setStyleSheet(pill_style)
-    
-        self.level_label = QLabel("⚡ LEVEL <span style='color:#00ffff;'>1</span>")
+
+        self.level_label = QLabel("⚡ LEVEL: 1")
         self.level_label.setStyleSheet(pill_style)
-    
-        self.drop_label = QLabel(f"💀 DROP <span style='color:#ff4757;'>{SHOTS_PER_DROP}</span>")
+
+        self.drop_label = QLabel(f"💀 DROP: {SHOTS_PER_DROP}/{SHOTS_PER_DROP}")
         self.drop_label.setStyleSheet(pill_style)
-    
+
+        # === Combo label (hidden when combo = 0) ===
+        self.combo_label = QLabel("🔥 COMBO: 0")
+        self.combo_label.setStyleSheet(pill_style)
+        self.combo_label.setVisible(False)
+
+        # === Shot timer label ===
+        self.timer_label = QLabel("⏱ 8.0s  1.0x")
+        self.timer_label.setStyleSheet(timer_pill_style)
+
+        # === Playtime label ===
+        self.playtime_label = QLabel("🕐 00:00")
+        self.playtime_label.setStyleSheet(pill_style)
+
+        # === Danger label (hidden when safe) ===
+        self.danger_label = QLabel("⚠ DANGER")
+        self.danger_label.setStyleSheet("""
+            QLabel {
+                background-color: rgba(239, 68, 68, 0.9);
+                border: 1px solid rgba(255, 100, 100, 0.95);
+                border-radius: 10px;
+                padding: 3px 8px;
+                color: white;
+                font-family: 'Segoe UI Black';
+                font-weight: 900;
+                font-size: 11px;
+            }
+        """)
+        self.danger_label.setVisible(False)
+
         hud_layout.addWidget(self.high_score_label)
         hud_layout.addWidget(self.score_label)
         hud_layout.addWidget(self.level_label)
         hud_layout.addWidget(self.drop_label)
-    
-        hud_layout.addStretch()
-    
-        # --- POWER PANEL (SEJAJAR DENGAN HUD) ---
+        hud_layout.addWidget(self.combo_label)
+        hud_layout.addWidget(self.danger_label)
+        hud_layout.addWidget(self.timer_label)
+        hud_layout.addWidget(self.playtime_label)
+
+        hud_layout.addStretch(1)
+
+        # Power panel
         power_panel = self.create_power_panel()
         hud_layout.addWidget(power_panel)
-    
-        hud_layout.addSpacing(20)
-    
-        # --- CONTROL BUTTONS (Small & Iconic) ---
-        btn_control_style = """
+
+        hud_layout.addSpacing(4)
+
+        # === Leaderboard button ===
+        self.lb_btn = QPushButton("🏆")
+        self.lb_btn.setToolTip("Leaderboard")
+        self.lb_btn.setStyleSheet("""
             QPushButton {
-                background-color: rgba(255, 255, 255, 0.1);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                border-radius: 10px;
+                background-color: rgba(255, 215, 0, 0.2);
+                border: 1px solid rgba(255, 215, 0, 0.5);
+                border-radius: 8px;
+                color: #FFD700;
+                font-size: 14px;
+                padding: 3px 8px;
+                min-width: 32px;
+            }
+            QPushButton:hover { background-color: rgba(255, 215, 0, 0.4); }
+        """)
+        self.lb_btn.setCursor(self.custom_hand_cursor)
+        self.lb_btn.clicked.connect(self.show_leaderboard)
+        hud_layout.addWidget(self.lb_btn)
+
+        # === Achievements button ===
+        self.ach_btn = QPushButton("🏅")
+        self.ach_btn.setToolTip("Achievements")
+        self.ach_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(139, 92, 246, 0.25);
+                border: 1px solid rgba(139, 92, 246, 0.5);
+                border-radius: 8px;
+                color: #c4b5fd;
+                font-size: 14px;
+                padding: 3px 8px;
+                min-width: 32px;
+            }
+            QPushButton:hover { background-color: rgba(139, 92, 246, 0.5); }
+        """)
+        self.ach_btn.setCursor(self.custom_hand_cursor)
+        self.ach_btn.clicked.connect(self.show_achievements)
+        hud_layout.addWidget(self.ach_btn)
+
+        hud_layout.addSpacing(2)
+
+        # Tombol MENU
+        self.menu_btn = QPushButton("🏠 MENU")
+        self.menu_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(0, 0, 0, 0.72);
+                border: 1px solid rgba(255, 255, 255, 0.25);
+                border-radius: 8px;
                 color: #e2e8f0;
                 font-weight: bold;
-                padding: 8px 15px;
+                font-size: 11px;
+                padding: 3px 10px;
+                min-width: 70px;
             }
             QPushButton:hover {
-                background-color: rgba(255, 255, 255, 0.25);
+                background-color: rgba(255, 255, 255, 0.18);
                 border-color: white;
             }
-        """
-    
-        #self.pause_btn = QPushButton("⏸ PAUSE")
-        #self.pause_btn.setStyleSheet(btn_control_style)
-        #self.pause_btn.setCursor(Qt.PointingHandCursor)
-        #self.pause_btn.clicked.connect(self.toggle_pause)
-
-        self.menu_btn = QPushButton("🏠 MENU")
-        self.menu_btn.setStyleSheet(btn_control_style)
+        """)
         self.menu_btn.setCursor(self.custom_cursor)
         self.menu_btn.clicked.connect(self.back_to_menu)
-    
-        #hud_layout.addWidget(self.pause_btn)
         hud_layout.addWidget(self.menu_btn)
-    
-        main_layout.addWidget(hud_container)
-    
-        # --- SCENE & VIEW ---
-        self.scene = GameScene()
-        self.view = GameView(self.scene)
-        main_layout.addWidget(self.view)
-    
-        # Connect Signals
+
+        self._position_hud()
+
+        # Connect Signals lama
         self.scene.score_changed.connect(self.update_score)
         self.scene.drop_counter_changed.connect(self.update_drop_counter)
         self.scene.level_changed.connect(self.update_level)
@@ -1479,29 +2025,64 @@ class MainWindow(QMainWindow):
         self.scene.power_collected.connect(self.on_power_collected)
         self.scene.power_updated.connect(self.update_all_power_buttons)
 
+        # === Connect Sinyal BARU ===
+        self.scene.combo_changed.connect(self.update_combo_label)
+        self.scene.timer_tick.connect(self.update_timer_label)
+        self.scene.multiplier_changed.connect(self.update_multiplier_display)
+        self.scene.playtime_changed.connect(self.update_playtime_label)
+        self.scene.danger_level_changed.connect(self.on_danger_level_changed)
+
         # Stop timer initially
         self.scene.timer.stop()
+
+        self.game_container.installEventFilter(self)
+
+    def _position_hud(self):
+        """Posisikan HUD overlay di top, GameView mengisi seluruh container"""
+        if not hasattr(self, 'hud_overlay') or not hasattr(self, 'view'):
+            return
+        w = self.game_container.width()
+        h = self.game_container.height()
+        if w == 0 or h == 0:
+            return
+        # GameView mengisi SELURUH area (di bawah HUD juga, HUD transparan)
+        self.view.setGeometry(0, 0, w, h)
+        # HUD tinggi menyesuaikan konten (sizeHint), minimum 48px
+        hud_h = max(48, self.hud_overlay.sizeHint().height())
+        self.hud_overlay.setGeometry(0, 0, w, hud_h)
+        self.hud_overlay.raise_()
+
+    def eventFilter(self, obj, event):
+        """Intercept resize event dari game_container"""
+        from PySide6.QtCore import QEvent
+        if obj == self.game_container and event.type() == QEvent.Type.Resize:
+            self._position_hud()
+        return super().eventFilter(obj, event)
     
     def start_new_game(self):
         """Memulai game baru dari nol"""
         self.scene.reset_game()
         self.scene.timer.start()
-        self.central_stack.setCurrentIndex(1) # Pindah ke halaman game
-        # Load high score saja
+        self.central_stack.setCurrentIndex(1)
         self.load_high_score_data()
+        QTimer.singleShot(50, self._position_hud)
 
     def load_saved_game(self):
         """Load game dari file"""
-        self.load_game_data() # Memanggil logika load JSON
+        self.load_game_data()
         self.scene.timer.start()
-        self.central_stack.setCurrentIndex(1) # Pindah ke halaman game
+        self.scene.shot_timer.start(rush_mode=False)
+        self.scene.game_timer.start()
+        self.central_stack.setCurrentIndex(1)
+        QTimer.singleShot(50, self._position_hud)
 
     def back_to_menu(self):
         """Kembali ke menu utama, pause game dan simpan"""
         self.scene.timer.stop()
-        self.save_game() # Auto save saat kembali ke menu
+        self.scene.shot_timer.stop()
+        self.scene.game_timer.stop()
+        self.save_game()
         self.central_stack.setCurrentIndex(0)
-        #self.pause_btn.setText("⏸ PAUSE") # Reset tombol pause
 
     def toggle_music(self, checked):
         self.music_enabled = checked
@@ -1520,70 +2101,74 @@ class MainWindow(QMainWindow):
         self.save_settings()
 
     def create_power_panel(self):
-        # === POWER UPS CONTAINER ===
-        # Kita buat container (Frame) untuk membungkus tombol-tombol
+        """Power panel - 1 baris, autofit, teks tidak terpotong"""
         power_frame = QFrame()
-        power_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
-        # Style transparan tapi ada border halus
+        power_frame.setFrameStyle(QFrame.NoFrame)
         power_frame.setStyleSheet("""
             QFrame {
-                background-color: rgba(0, 0, 0, 0.3);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 10px;
-                padding: 5px;
+                background-color: rgba(0, 0, 0, 0.68);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 8px;
             }
         """)
-        
-        # --- LAYOUT PILIHAN: GRID (KOTAK) ---
-        # Menggunakan Grid agar tersusun rapi (misal 5 kolom ke samping, atau 2 baris)
-        # Jika ingin memanjang ke samping (sejajar 1 baris), ganti QGridLayout dengan QHBoxLayout
-        power_layout = QHBoxLayout(power_frame) 
-        power_layout.setSpacing(3)
-        power_layout.setContentsMargins(5, 3, 5, 3)
-        power_layout.setAlignment(Qt.AlignCenter) # Tengah
 
-        # Label Judul Kecil (Optional - bisa dihapus jika ingin lebih ringkas)
+        power_layout = QHBoxLayout(power_frame)
+        power_layout.setSpacing(3)
+        power_layout.setContentsMargins(6, 3, 6, 3)
+        power_layout.setAlignment(Qt.AlignVCenter)
+
+        # Label "SKILLS:" kecil
         lbl_power = QLabel("SKILLS:")
-        lbl_power.setStyleSheet("font-weight: bold; color: #FFD700; margin-right: 5px;")
+        lbl_power.setStyleSheet("""
+            color: #FFD700;
+            font-weight: bold;
+            font-size: 10px;
+            background: transparent;
+            border: none;
+            padding: 0px 3px 0px 0px;
+        """)
         power_layout.addWidget(lbl_power)
 
         self.power_buttons = {}
         manager = get_power_manager()
-        
-        # Daftar Power Up
+
+        # Emoji & nama pendek per power type
+        power_info_map = {
+            PowerUpType.BOMB:     ("💣", "BOMB"),
+            PowerUpType.LASER:    ("⚡", "LASER"),
+            PowerUpType.RAINBOW:  ("🌈", "RAINBO"),
+            PowerUpType.FIREBALL: ("🔥", "FIREBA"),
+            PowerUpType.FREEZE:   ("❄️", "FREEZE"),
+        }
+
         power_types = [
-            PowerUpType.BOMB, 
-            PowerUpType.LASER, 
-            PowerUpType.RAINBOW, 
+            PowerUpType.BOMB,
+            PowerUpType.LASER,
+            PowerUpType.RAINBOW,
             PowerUpType.FIREBALL,
-            PowerUpType.FREEZE
+            PowerUpType.FREEZE,
         ]
 
         for p_type in power_types:
             info = manager.get_power_info(p_type)
-            # Ambil nama pendek
-            full_desc = manager.get_power_description(p_type)
-            # Format Text: Nama (atas) Jumlah (bawah)
-            name_only = full_desc.split('\n')[0].replace(" ", "") # Hapus spasi biar pendek
-            btn_text = f"{name_only}\n{info['charges']}"
-            
-            btn = QPushButton(btn_text)
+            emoji, short_name = power_info_map[p_type]
+            charges = info["charges"]
+
+            btn = QPushButton(emoji + short_name + chr(10) + str(charges))
             btn.setCursor(self.custom_hand_cursor)
-            btn.setFixedSize(65, 42)  # Ukuran tombol fix agar seragam
-            
-            # Hubungkan klik tombol
-            # Gunakan lambda dengan checked=False agar p_type terikat benar
+            # Biarkan Qt menentukan lebar berdasarkan konten, hanya fix tinggi
+            btn.setFixedHeight(40)
+            btn.setMinimumWidth(58)
+            btn.setSizePolicy(
+                btn.sizePolicy().horizontalPolicy(),
+                btn.sizePolicy().verticalPolicy()
+            )
+
             btn.clicked.connect(lambda checked=False, t=p_type: self.activate_powerup(t))
-            
-            # Style tombol default (abu-abu jika 0)
             self.update_power_button_style(btn, p_type)
-            
             self.power_buttons[p_type] = btn
-            
-            # Masukkan ke Layout
             power_layout.addWidget(btn)
-            
-        # PENTING: Kembalikan frame ini ke setup_game_ui
+
         return power_frame
     
     # --- Tambahkan metode ini di dalam class MainWindow ---
@@ -1606,70 +2191,39 @@ class MainWindow(QMainWindow):
     def update_power_button_style(self, btn, power_type):
         """Update style button berdasarkan status"""
         info = get_power_manager().get_power_info(power_type)
-        if info and info['can_use']:
-            btn.setStyleSheet("""
+        base = """
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                font-size: 10px;
+                font-weight: bold;
+                font-family: 'Segoe UI';
+                border-radius: 7px;
+                padding: 2px 4px;
+                text-align: center;
+            }
+        """
+        if info and info['can_use']:
+            btn.setStyleSheet(base + """
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 #10b981, stop:1 #059669);
                 color: white;
                 border: 2px solid #34d399;
-                border-radius: 10px;
-                font-weight: bold;
             }
             QPushButton:hover { background: #34d399; }
             """)
         else:
-            btn.setStyleSheet("""
+            btn.setStyleSheet(base + """
             QPushButton {
-                background: rgba(100,100,100,0.3);
-                color: #64748b;
-                border: 1px solid #475569;
-                border-radius: 10px;
+                background: rgba(40, 40, 60, 0.7);
+                color: #94a3b8;
+                border: 1px solid #334155;
             }
-        """)
-
-    def update_next_bubble_ui(self, color_idx):
-        """Update tampilan bubble berikutnya (Preview)"""
-        # Hapus indikator lama jika ada
-        if hasattr(self, 'next_bubble_indicator'):
-            self.scene.removeItem(self.next_bubble_indicator)
-            self.scene.removeItem(self.next_text_item)
-            
-        # --- POSISI BARU YANG LEBIH TINGGI ---
-        # Kita samakan ketinggiannya (Y) dengan area shooter agar sejajar
-        # scene_height - 150 (sama dengan shooter)
-        base_y = self.scene.scene_height - 150 
-        base_x = 100  # Geser sedikit ke kanan dari pojok kiri (sebelumnya 60)
-
-        # 1. Setup Text Label
-        font = QFont("Segoe UI", 10, QFont.Bold)
-        self.next_text_item = self.scene.addText("NEXT", font)
-        self.next_text_item.setDefaultTextColor(QColor("#a0aec0")) # Warna abu terang
-        
-        # Posisikan teks sedikit di atas bolanya
-        # boundingRect().width() digunakan agar teks berada di tengah relatif terhadap bola
-        text_width = self.next_text_item.boundingRect().width()
-        self.next_text_item.setPos(base_x - (text_width / 2), base_y + 30)
-        
-        # 2. Setup Bubble Preview
-        # is_preview=True membuat ukurannya sedikit lebih kecil (0.8x)
-        self.next_bubble_indicator = Bubble(color_idx, base_x, base_y, is_preview=True)
-        
-        # Tambahkan efek glow/shadow agar terlihat premium
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(15)
-        shadow.setColor(QColor(0, 0, 0, 150))
-        shadow.setOffset(0, 5)
-        self.next_bubble_indicator.setGraphicsEffect(shadow)
-
-        self.scene.addItem(self.next_bubble_indicator)
+            QPushButton:hover { background: rgba(60, 60, 80, 0.8); }
+            """)
 
     def on_power_collected(self, power_type):
         """Slot saat player mendapatkan power-up"""
-        # Update tampilan tombol karena charges bertambah
         self.update_all_power_buttons()
-        
-        # Optional: Flash effect pada tombol yang bertambah (bisa ditambahkan nanti)
 
     def update_all_power_buttons(self):
         """Refresh text dan style semua tombol power"""
@@ -1679,296 +2233,222 @@ class MainWindow(QMainWindow):
         if not hasattr(self, 'power_buttons'):
             return
 
+        power_info_map = {
+            PowerUpType.BOMB:     ("💣", "BOMB"),
+            PowerUpType.LASER:    ("⚡", "LASER"),
+            PowerUpType.RAINBOW:  ("🌈", "RAINBO"),
+            PowerUpType.FIREBALL: ("🔥", "FIREBA"),
+            PowerUpType.FREEZE:   ("❄️", "FREEZE"),
+        }
         for p_type, btn in self.power_buttons.items():
             info = manager.get_power_info(p_type)
             if info:
-                # 1. Ambil Nama Power (Parsing dari deskripsi)
-                # Format deskripsi di bubble_power.py: "💣 BOMB\n..."
-                desc = manager.get_power_description(p_type)
-                # Ambil baris pertama, misal: "💣 BOMB"
-                header = desc.split('\n')[0] 
-                # Hapus emoji jika ingin lebih bersih, atau biarkan saja
-                # Kita set text button: "NAMA\nJUMLAH"
-                btn.setText(f"{header}\n{info['charges']}")
-                
-                # 2. Update Style (Warna hijau jika bisa dipakai, abu jika tidak)
+                emoji, short_name = power_info_map.get(p_type, ("⭐", "PWR"))
+                btn.setText(emoji + short_name + chr(10) + str(info['charges']))
                 self.update_power_button_style(btn, p_type)
 
-    # --- UI UPDATE SLOT ---
-    def update_high_score(self, val):
-        self.high_score_label.setText(f"🏆 BEST <span style='color:#00FF00;'>{val}</span>")
-        self.save_high_score_data()
+    # --- UI UPDATE SLOTS ---
 
     def update_score(self, score):
-        self.score_label.setText(f"💎 SCORE <span style='color:#FFD700;'>{score}</span>")
-        
+        if hasattr(self, 'score_label'):
+            self.score_label.setText(f"💎 SCORE: {score:,}")
+
+    def update_high_score(self, val):
+        if hasattr(self, 'high_score_label'):
+            self.high_score_label.setText(f"🏆 BEST: {val:,}")
+        self.save_high_score_data()
+
     def update_level(self, level):
-        self.level_label.setText(f"⚡ LEVEL <span style='color:#00ffff;'>{level}</span>")
+        if hasattr(self, 'level_label'):
+            self.level_label.setText(f"⚡ LEVEL: {level}")
 
     def update_drop_counter(self, count):
-        # Menggunakan simbol yang lebih bersih
-        balls = "● " * count
-        empty = "○ " * (SHOTS_PER_DROP - count)
-        self.drop_label.setText(f"💀 DROP <span style='color:#ff4757;'>{balls}</span>")
-        
-    def toggle_pause(self):
-        if self.scene.timer.isActive():
-            self.scene.timer.stop()
-            self.pause_btn.setText("▶ RESUME")            
-            self.sound_manager.pause_bgm()
-        else:
-            self.scene.timer.start()
-            self.pause_btn.setText("⏸ PAUSE")
-            if self.music_enabled:
-                self.sound_manager.resume_bgm()
-            
-    def show_game_over(self):
-        self.scene.timer.stop()
-        self.save_high_score_data()
-        
-        # === PERBAIKAN: JANGAN HAPUS SAVE FILE ===
-        # Save file tetap dipertahankan agar bisa continue
-        # Hanya hapus jika pemain memilih "New Game" dari menu
-        # save_file = self.save_dir / "save_v6.json"
-        # if save_file.exists():
-        #     try: save_file.unlink()
-        #     except: pass
-        # ==========================================
-        
-        # Setup Dialog
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Game Over")
-        dialog.setFixedSize(400, 420)
-        dialog.setWindowFlags(Qt.FramelessWindowHint)
-        dialog.setAttribute(Qt.WA_TranslucentBackground)
-        
-        # Layout Utama Dialog
-        layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(10, 10, 10, 10)
-        
-        # Frame Konten (Container Utama)
-        content_frame = QFrame()
-        content_frame.setStyleSheet("""
-            QFrame {
-                background-color: #0f172a;
-                border: 2px solid #334155;
-                border-radius: 25px;
-            }
-        """)
-        
-        # Shadow Effect untuk pop-up
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(40)
-        shadow.setColor(QColor(0,0,0,200))
-        shadow.setOffset(0, 10)
-        content_frame.setGraphicsEffect(shadow)
-        
-        inner_layout = QVBoxLayout(content_frame)
-        inner_layout.setSpacing(5)
-        inner_layout.setContentsMargins(30, 40, 30, 40)
-        
-        # --- 1. TITLE ---
-        title = QLabel("GAME OVER")
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("""
-            border: none;
-            font-family: 'Segoe UI Black', Arial;
-            font-size: 36px; 
-            font-weight: 900; 
-            color: #ef4444;
-            margin-bottom: 10px;
-        """)
-        inner_layout.addWidget(title)
-        
-        # --- 2. STATS CONTAINER (Kotak Nilai) ---
-        stats_box = QFrame()
-        stats_box.setStyleSheet("""
-            QFrame {
-                background-color: rgba(255, 255, 255, 0.05);
-                border-radius: 15px;
-                border: 1px solid rgba(255, 255, 255, 0.1);
-            }
-        """)
-        stats_layout = QVBoxLayout(stats_box)
-        stats_layout.setSpacing(2)
-        stats_layout.setContentsMargins(0, 15, 0, 15)
+        if hasattr(self, 'drop_label'):
+            self.drop_label.setText(f"💀 DROP: {count}/{SHOTS_PER_DROP}")
 
-        # Level Label
-        lbl_lvl = QLabel(f"LEVEL {self.scene.level}")
-        lbl_lvl.setAlignment(Qt.AlignCenter)
-        lbl_lvl.setStyleSheet("border: none; color: #94a3b8; font-size: 14px; font-weight: bold; letter-spacing: 2px;")
-        
-        # Score Label (Angka Besar)
-        lbl_score = QLabel(f"{self.scene.score}")
-        lbl_score.setAlignment(Qt.AlignCenter)
-        lbl_score.setStyleSheet("border: none; color: #fbbf24; font-size: 48px; font-weight: 900; margin: 5px 0;")
-        
-        # High Score Label
-        lbl_best = QLabel(f"BEST SCORE: {self.scene.high_score}")
-        lbl_best.setAlignment(Qt.AlignCenter)
-        lbl_best.setStyleSheet("border: none; color: #38bdf8; font-size: 14px; font-weight: bold;")
-
-        stats_layout.addWidget(lbl_lvl)
-        stats_layout.addWidget(lbl_score)
-        stats_layout.addWidget(lbl_best)
-        
-        inner_layout.addWidget(stats_box)
-        inner_layout.addSpacing(20)
-        
-        # --- 3. BUTTONS ---
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(15)
-        
-        btn_style = """
-            QPushButton {
-                border-radius: 10px;
-                padding: 10px;
-                font-family: 'Segoe UI';
-                font-weight: bold;
-                font-size: 12px;
-                color: white;
-                border: none;
-            }
-            QPushButton:pressed { margin-top: 2px; }
-        """
-        
-        # === PERBAIKAN: Tombol Continue (Bukan Try Again) ===
-        continue_btn = QPushButton("↺ CONTINUE")
-        continue_btn.setCursor(self.custom_hand_cursor)
-        continue_btn.setStyleSheet(btn_style + """
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #10b981, stop:1 #059669);
-                border-bottom: 3px solid #047857;
-            }
-            QPushButton:hover { background: #34d399; }
-        """)
-        
-        # Tombol New Game (Merah)
-        new_game_btn = QPushButton("🆕 NEW GAME")
-        new_game_btn.setCursor(self.custom_hand_cursor)
-        new_game_btn.setStyleSheet(btn_style + """
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ef4444, stop:1 #dc2626);
-                border-bottom: 3px solid #b91c1c;
-            }
-            QPushButton:hover { background: #f87171; }
-        """)
-        
-        # Tombol Menu (Abu-abu)
-        menu_btn = QPushButton("🏠 MENU")
-        menu_btn.setCursor(self.custom_cursor)
-        menu_btn.setStyleSheet(btn_style + """
-            QPushButton {
-                background-color: #475569;
-                border-bottom: 3px solid #334155;
-            }
-            QPushButton:hover { background-color: #64748b; }
-        """)
-        
-        # === CONNECT BUTTONS ===
-        # Continue: Load game terakhir (dari save file)
-        continue_btn.clicked.connect(lambda: [dialog.accept(), self.continue_from_save()])
-        
-        # New Game: Hapus save dan mulai fresh
-        new_game_btn.clicked.connect(lambda: [dialog.accept(), self.start_new_game_fresh()])
-        
-        # Menu: Kembali ke menu utama
-        menu_btn.clicked.connect(lambda: [dialog.accept(), self.back_to_menu()])
-        
-        btn_layout.addWidget(continue_btn)
-        btn_layout.addWidget(new_game_btn)
-        btn_layout.addWidget(menu_btn)
-        
-        inner_layout.addLayout(btn_layout)
-        
-        layout.addWidget(content_frame)
-        dialog.exec()
-
-
-# ============================================
-# TAMBAHKAN 2 METHOD BARU di MainWindow
-# ============================================
-# Letakkan SEBELUM method closeEvent() (sekitar baris 1250)
-
-    def continue_from_save(self):
-        """Load game dari save terakhir dan lanjutkan"""
-        # Load game dari file
-        self.load_game_data()
-        
-        # Mulai timer
-        self.scene.timer.start()
-        
-        # Pastikan di halaman game
-        self.central_stack.setCurrentIndex(1)
-
-
-    def start_new_game_fresh(self):
-        """Mulai game baru dari nol (hapus save)"""
-        # Hapus save file
-        save_file = self.save_dir / "save_v6.json"
-        if save_file.exists():
-            try:
-                save_file.unlink()
-            except Exception as e:
-                print(f"Error deleting save: {e}")
-        
-        # Reset game
-        self.scene.reset_game()
-        self.scene.timer.start()
-        self.central_stack.setCurrentIndex(1)
-
-    # --- UI UPDATES & HELPER ---
-    
     def update_next_bubble_ui(self, color_idx):
-        """Update tampilan bubble berikutnya (Preview)"""
-        # Hapus indikator lama jika ada
+        """Update next bubble preview display"""
         if hasattr(self, 'next_bubble_indicator'):
-            self.scene.removeItem(self.next_bubble_indicator)
-            self.scene.removeItem(self.next_text_item)
-            
-        # --- POSISI BARU YANG LEBIH TINGGI ---
-        # Kita samakan ketinggiannya (Y) dengan area shooter agar sejajar
-        # scene_height - 150 (sama dengan shooter)
-        base_y = self.scene.scene_height - 150 
-        base_x = 100  # Geser sedikit ke kanan dari pojok kiri (sebelumnya 60)
+            try:
+                self.scene.removeItem(self.next_bubble_indicator)
+                self.scene.removeItem(self.next_text_item)
+            except Exception:
+                pass
 
-        # 1. Setup Text Label
+        base_y = self.scene.scene_height - 110
+        base_x = self.scene.grid_offset_x + 50
+
         font = QFont("Segoe UI", 10, QFont.Bold)
         self.next_text_item = self.scene.addText("NEXT", font)
-        self.next_text_item.setDefaultTextColor(QColor("#a0aec0")) # Warna abu terang
-        
-        # Posisikan teks sedikit di atas bolanya
-        # boundingRect().width() digunakan agar teks berada di tengah relatif terhadap bola
+        self.next_text_item.setDefaultTextColor(QColor("#a0aec0"))
         text_width = self.next_text_item.boundingRect().width()
-        self.next_text_item.setPos(base_x - (text_width / 2), base_y + 30)
-        
-        # 2. Setup Bubble Preview
-        # is_preview=True membuat ukurannya sedikit lebih kecil (0.8x)
+        self.next_text_item.setPos(base_x - text_width / 2, base_y + 30)
+
         self.next_bubble_indicator = Bubble(color_idx, base_x, base_y, is_preview=True)
-        
-        # Tambahkan efek glow/shadow agar terlihat premium
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(15)
         shadow.setColor(QColor(0, 0, 0, 150))
         shadow.setOffset(0, 5)
         self.next_bubble_indicator.setGraphicsEffect(shadow)
-
         self.scene.addItem(self.next_bubble_indicator)
 
-    def update_high_score(self, val):
-        self.high_score_label.setText(f"🏆 BEST: {val}")
-        self.save_high_score_data()
+    # --- HUD Slots: Timer, Combo, Danger ---
 
-    def update_score(self, score):
-        self.score_label.setText(f"💎 SCORE: {score}")
-        
-    def update_drop_counter(self, count):
-        balls = "⚫" * count
-        empty = "⚪" * (SHOTS_PER_DROP - count)
-        self.drop_label.setText(f"💀 DROP IN: {balls}{empty}")
-        
-    def update_level(self, level):
-        self.level_label.setText(f"⚡ LEVEL: {level}")
+    def update_combo_label(self, combo: int):
+        if combo >= 2:
+            self.combo_label.setVisible(True)
+            color = "#ff4500" if combo >= 5 else "#ffa500"
+            self.combo_label.setStyleSheet(f"""
+                QLabel {{
+                    background-color: rgba(255, 100, 0, 0.75);
+                    border: 1px solid {color};
+                    border-radius: 10px;
+                    padding: 3px 8px;
+                    color: white;
+                    font-family: 'Segoe UI Black';
+                    font-weight: 900;
+                    font-size: 11px;
+                }}
+            """)
+            self.combo_label.setText(f"🔥 COMBO x{combo}")
+        else:
+            self.combo_label.setVisible(False)
+
+    def update_timer_label(self, remaining: float):
+        if not hasattr(self, 'timer_label'):
+            return
+        if remaining > 5.0:
+            color_style = "background-color: rgba(16, 185, 129, 0.75); border: 1px solid rgba(52, 211, 153, 0.6);"
+        elif remaining > 2.5:
+            color_style = "background-color: rgba(234, 179, 8, 0.75); border: 1px solid rgba(250, 204, 21, 0.6);"
+        else:
+            color_style = "background-color: rgba(239, 68, 68, 0.85); border: 1px solid rgba(248, 113, 113, 0.8);"
+        self.timer_label.setStyleSheet(f"""
+            QLabel {{
+                {color_style}
+                border-radius: 10px;
+                padding: 3px 8px;
+                color: white;
+                font-family: 'Segoe UI';
+                font-weight: bold;
+                font-size: 11px;
+            }}
+        """)
+        self.timer_label.setText(f"⏱ {remaining:.1f}s")
+
+    def update_multiplier_display(self, mult: float):
+        if not hasattr(self, 'timer_label'):
+            return
+        current = self.timer_label.text().split("  ")[0]
+        suffix = f"  {mult:.1f}x" if mult > 1.0 else ""
+        self.timer_label.setText(current + suffix)
+
+    def update_playtime_label(self, time_str: str):
+        if hasattr(self, 'playtime_label'):
+            self.playtime_label.setText(f"🕐 {time_str}")
+
+    def on_danger_level_changed(self, level: int):
+        if not hasattr(self, 'drop_label'):
+            return
+
+        # --- Danger label pill (shows/hides based on level) ---
+        if hasattr(self, 'danger_label'):
+            if level >= 3:
+                self.danger_label.setText("⚠ CRITICAL")
+                self.danger_label.setStyleSheet("""
+                    QLabel {
+                        background-color: rgba(220, 38, 38, 0.95);
+                        border: 1px solid rgba(255, 100, 100, 1.0);
+                        border-radius: 10px; padding: 3px 8px;
+                        color: white; font-family: 'Segoe UI Black';
+                        font-weight: 900; font-size: 11px;
+                    }
+                """)
+                self.danger_label.setVisible(True)
+            elif level >= 2:
+                self.danger_label.setText("⚠ DANGER")
+                self.danger_label.setStyleSheet("""
+                    QLabel {
+                        background-color: rgba(239, 68, 68, 0.85);
+                        border: 1px solid rgba(255, 120, 50, 0.9);
+                        border-radius: 10px; padding: 3px 8px;
+                        color: white; font-family: 'Segoe UI Black';
+                        font-weight: 900; font-size: 11px;
+                    }
+                """)
+                self.danger_label.setVisible(True)
+            elif level >= 1:
+                self.danger_label.setText("⚠ WARNING")
+                self.danger_label.setStyleSheet("""
+                    QLabel {
+                        background-color: rgba(234, 179, 8, 0.80);
+                        border: 1px solid rgba(250, 204, 21, 0.7);
+                        border-radius: 10px; padding: 3px 8px;
+                        color: white; font-family: 'Segoe UI Black';
+                        font-weight: 900; font-size: 11px;
+                    }
+                """)
+                self.danger_label.setVisible(True)
+            else:
+                self.danger_label.setVisible(False)
+
+        # --- Drop counter pill color change ---
+        if level >= 3:
+            self.drop_label.setStyleSheet("""
+                QLabel {
+                    background-color: rgba(239, 68, 68, 0.85);
+                    border: 1px solid rgba(255, 100, 100, 0.9);
+                    border-radius: 10px; padding: 3px 8px;
+                    color: white; font-family: 'Segoe UI';
+                    font-weight: bold; font-size: 11px;
+                }
+            """)
+        elif level >= 2:
+            self.drop_label.setStyleSheet("""
+                QLabel {
+                    background-color: rgba(234, 179, 8, 0.75);
+                    border: 1px solid rgba(250, 204, 21, 0.6);
+                    border-radius: 10px; padding: 3px 8px;
+                    color: white; font-family: 'Segoe UI';
+                    font-weight: bold; font-size: 11px;
+                }
+            """)
+        else:
+            self.drop_label.setStyleSheet("""
+                QLabel {
+                    background-color: rgba(0, 0, 0, 0.72);
+                    border: 1px solid rgba(255, 255, 255, 0.18);
+                    border-radius: 10px; padding: 3px 8px;
+                    color: white; font-family: 'Segoe UI';
+                    font-weight: bold; font-size: 11px;
+                }
+            """)
+
+    def show_leaderboard(self):
+        was_active = self.scene.timer.isActive()
+        if was_active:
+            self.scene.timer.stop()
+            self.scene.shot_timer.pause()
+            self.scene.game_timer.pause()
+        dlg = LeaderboardDialog(self, current_score=self.scene.score_mgr.score, current_level=self.scene.level)
+        dlg.exec()
+        if was_active:
+            self.scene.timer.start()
+            self.scene.shot_timer.resume()
+            self.scene.game_timer.resume()
+
+    def show_achievements(self):
+        was_active = self.scene.timer.isActive()
+        if was_active:
+            self.scene.timer.stop()
+            self.scene.shot_timer.pause()
+            self.scene.game_timer.pause()
+        dlg = AchievementDialog(self)
+        dlg.exec()
+        if was_active:
+            self.scene.timer.start()
+            self.scene.shot_timer.resume()
+            self.scene.game_timer.resume()
 
     # --- SAVE / LOAD DATA ---
 
@@ -1991,83 +2471,152 @@ class MainWindow(QMainWindow):
 
     def save_game(self):
         if self.scene.check_game_over_condition(): return
-        
-        # 1. Ambil data Power Up saat ini
+
         power_manager = get_power_manager()
-        power_data = {}
-        
-        # Loop semua power yang ada di manager dan simpan jumlah charges-nya
-        for p_type, p_obj in power_manager.powers.items():
-            power_data[p_type] = p_obj.charges
+        power_data = {p_type: p_obj.charges for p_type, p_obj in power_manager.powers.items()}
 
         save_data = {
-            'score': self.scene.score,
-            'level': self.scene.level,
+            'score':            self.scene.score_mgr.score,
+            'high_score':       self.scene.score_mgr.high_score,
+            'level':            self.scene.level,
             'shots_until_drop': self.scene.shots_until_drop,
-            'grid': self.scene.grid.grid,
-            'shooter_current': self.scene.shooter.current_color,
-            'shooter_next': self.scene.shooter.next_color,
-            'powerups': power_data  # <--- INI BAGIAN PENTING YANG DITAMBAHKAN
+            'grid':             self.scene.grid.grid,
+            'shooter_current':  self.scene.shooter.current_color,
+            'shooter_next':     self.scene.shooter.next_color,
+            'powerups':         power_data,
+            'playtime':         self.scene.game_timer.elapsed,
+            'total_shots':      self.scene.score_mgr.total_shots,
+            'total_pops':       self.scene.score_mgr.total_pops,
+            'best_combo':       self.scene.score_mgr.best_combo,
         }
-        
+
         try:
-            with open(self.save_dir / "save_v6.json", 'w') as f: json.dump(save_data, f)
-            print("✅ Game Saved with Skills!")
-        except Exception as e: print(f"Save Fail: {e}")
+            with open(self.save_dir / "save_v6.json", 'w') as f:
+                json.dump(save_data, f)
+            print("✅ Game Saved!")
+        except Exception as e:
+            print(f"Save Fail: {e}")
 
     def load_game_data(self):
-        # Load High Score dulu
         self.load_high_score_data()
-        
+
         save_file = self.save_dir / "save_v6.json"
         if save_file.exists():
             try:
                 with open(save_file, 'r') as f:
                     data = json.load(f)
+
+                    # Restore scene state
                     self.scene.score = data.get('score', 0)
                     self.scene.level = data.get('level', 1)
                     self.scene.shots_until_drop = data.get('shots_until_drop', SHOTS_PER_DROP)
-                    
+
+                    # Restore score_mgr
+                    self.scene.score_mgr._score = self.scene.score
+                    hs = data.get('high_score', self.scene.high_score)
+                    self.scene.score_mgr._high_score = hs
+                    self.scene.high_score = hs
+
                     if 'grid' in data:
                         self.scene.grid.grid = data['grid']
                         self.scene.create_bubbles_visuals()
-                    
+
                     self.scene.shooter.current_color = data.get('shooter_current', 0)
                     self.scene.shooter.next_color = data.get('shooter_next', 1)
                     self.scene.shooter.update_loaded_bubble_visual()
-                    
-                    # === FIX: LOAD POWER UPS / SKILLS ===
-                    if 'powerups' in data:
-                        power_manager = get_power_manager()
-                        saved_powers = data['powerups']
-                        
-                        # Reset dan Update charges sesuai save file
-                        for p_type, count in saved_powers.items():
-                            if p_type in power_manager.powers:
-                                power_manager.powers[p_type].charges = count
-                        
-                        # Update tampilan tombol di UI (Agar angka di tombol berubah)
-                        self.update_all_power_buttons()
-                    # ====================================
 
-                    # Refresh UI Scene
+                    if 'powerups' in data:
+                        pm = get_power_manager()
+                        for p_type, count in data['powerups'].items():
+                            if p_type in pm.powers:
+                                pm.powers[p_type].charges = count
+                        self.update_all_power_buttons()
+
+                    # Refresh UI
                     self.scene.score_changed.emit(self.scene.score)
                     self.scene.level_changed.emit(self.scene.level)
                     self.scene.drop_counter_changed.emit(self.scene.shots_until_drop)
                     self.scene.next_bubble_changed.emit(self.scene.shooter.next_color)
                     self.scene.update_background_color()
-                    
+                    self.update_high_score(hs)
+
                     print("✅ Game Loaded Successfully!")
-                    
+
             except Exception as e:
                 print(f"Load Fail: {e}")
-                self.start_new_game() # Fallback jika file rusak
+                self.start_new_game()
         else:
-            self.start_new_game()    
+            self.start_new_game()
            
+    def show_game_over(self):
+        self.scene.timer.stop()
+        self.scene.shot_timer.stop()
+        self.scene.game_timer.stop()
+        self.save_high_score_data()
+
+        leaderboard = get_leaderboard(self.save_dir)
+        stats = self.scene.score_mgr.get_stats()
+        playtime = self.scene.game_timer.elapsed
+        leaderboard.add_entry(
+            score=stats['score'],
+            level=self.scene.level,
+            name="PLAYER",
+            total_shots=stats['total_shots'],
+            best_combo=stats['best_combo'],
+            playtime_sec=playtime,
+        )
+
+        full_stats = {
+            'score':       stats['score'],
+            'high_score':  self.scene.score_mgr.high_score,
+            'level':       self.scene.level,
+            'total_shots': stats['total_shots'],
+            'total_pops':  stats['total_pops'],
+            'best_combo':  stats['best_combo'],
+            'playtime':    playtime,
+        }
+
+        dlg = GameOverDialog(
+            parent=self,
+            stats=full_stats,
+            on_continue=self.continue_from_save,
+            on_new_game=self.start_new_game_fresh,
+            on_menu=self.back_to_menu,
+        )
+        dlg.exec()
+
+    def continue_from_save(self):
+        """Load game dari save terakhir dan lanjutkan"""
+        self.load_game_data()
+        self.scene.timer.start()
+        self.scene.shot_timer.start(rush_mode=False)
+        self.scene.game_timer.start()
+        self.central_stack.setCurrentIndex(1)
+        QTimer.singleShot(50, self._position_hud)
+
+    def start_new_game_fresh(self):
+        """Mulai game baru dari nol (hapus save)"""
+        save_file = self.save_dir / "save_v6.json"
+        if save_file.exists():
+            try:
+                save_file.unlink()
+            except Exception as e:
+                print(f"Error deleting save: {e}")
+        self.scene.reset_game()
+        self.scene.timer.start()
+        self.central_stack.setCurrentIndex(1)
+        QTimer.singleShot(50, self._position_hud)
+
+    def resizeEvent(self, event):
+        """Trigger HUD repositioning saat window di-resize"""
+        super().resizeEvent(event)
+        if hasattr(self, '_position_hud'):
+            self._position_hud()
+
     def closeEvent(self, event):
-        # Hanya auto-save jika sedang di dalam game (index 1)
         if self.central_stack.currentIndex() == 1:
+            self.scene.shot_timer.stop()
+            self.scene.game_timer.stop()
             self.save_game()
         event.accept()
 
