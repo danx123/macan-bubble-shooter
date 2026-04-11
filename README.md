@@ -11,7 +11,7 @@ boss enemies, daily challenges, a replay system, and a fully immersive fullscree
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
 ![PySide6](https://img.shields.io/badge/PySide6-6.0+-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
-![Version](https://img.shields.io/badge/Version-6.5.0-orange.svg)
+![Version](https://img.shields.io/badge/Version-6.7.1-orange.svg)
 
 <img width="1365" height="767" alt="image" src="https://github.com/user-attachments/assets/07ffad18-7222-4943-89b8-1c0a0b7f3248" />
 
