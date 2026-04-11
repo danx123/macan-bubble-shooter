@@ -1572,7 +1572,7 @@ class WelcomeScreen(QWidget):
                  daily_callback=None, leaderboard_callback=None,
                  achievements_callback=None, colorblind_callback=None,
                  custom_cursor=None, music_on=True, sfx_on=True,
-                 colorblind_on=False):
+                 colorblind_on=False, continue_daily_callback=None):
         super().__init__()
 
         bg_path = Path(__file__).parent / "ui" / "bubble_bgn.webp"
@@ -1585,10 +1585,12 @@ class WelcomeScreen(QWidget):
         self.initial_colorblind  = colorblind_on
         self.custom_cursor       = custom_cursor if custom_cursor else Qt.PointingHandCursor
 
-        self._daily_cb        = daily_callback
-        self._lb_cb           = leaderboard_callback
-        self._ach_cb          = achievements_callback
-        self._cb_cb           = colorblind_callback
+        self._daily_cb             = daily_callback
+        self._lb_cb                = leaderboard_callback
+        self._ach_cb               = achievements_callback
+        self._cb_cb                = colorblind_callback
+        self._load_cb              = load_callback
+        self._continue_daily_cb    = continue_daily_callback
 
         self.setup_ui(start_callback, load_callback, quit_callback,
                       music_callback, sfx_callback)
@@ -1604,6 +1606,86 @@ class WelcomeScreen(QWidget):
             grad.setColorAt(0.0, QColor("#0f172a"))
             grad.setColorAt(1.0, QColor("#1e293b"))
             painter.fillRect(self.rect(), grad)
+
+    def _show_continue_menu(self):
+        """Show sub-menu: Continue Regular Game or Continue Daily Challenge."""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QFrame, QLabel, QPushButton
+        dlg = QDialog(self)
+        dlg.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        dlg.setAttribute(Qt.WA_TranslucentBackground)
+        dlg.setFixedSize(360, 260)
+
+        outer = QVBoxLayout(dlg)
+        outer.setContentsMargins(12, 12, 12, 12)
+
+        card = QFrame()
+        card.setStyleSheet("""
+            QFrame {
+                background-color: #0a0e1a;
+                border: 1px solid #1e3a5f;
+                border-radius: 20px;
+            }
+        """)
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(40)
+        shadow.setColor(QColor(0, 0, 0, 200))
+        shadow.setOffset(0, 10)
+        card.setGraphicsEffect(shadow)
+        outer.addWidget(card)
+
+        vl = QVBoxLayout(card)
+        vl.setContentsMargins(28, 28, 28, 24)
+        vl.setSpacing(12)
+
+        title = QLabel("💾  CONTINUE")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet(
+            "color: #60a5fa; font-size: 20px; font-weight: 900; "
+            "font-family: 'Segoe UI Black'; border: none; background: transparent;"
+        )
+        vl.addWidget(title)
+
+        sub = QLabel("Which game would you like to resume?")
+        sub.setAlignment(Qt.AlignCenter)
+        sub.setStyleSheet("color: #64748b; font-size: 12px; border: none; background: transparent;")
+        vl.addWidget(sub)
+
+        btn_style_regular = """
+            QPushButton {
+                color: white; border: none; border-radius: 14px; padding: 13px 10px;
+                font-family: 'Segoe UI'; font-size: 14px; font-weight: bold;
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                    stop:0 #3b82f6, stop:1 #2563eb);
+                border-bottom: 3px solid #1d4ed8;
+            }
+            QPushButton:hover { background: #60a5fa; }
+            QPushButton:pressed { margin-top: 2px; }
+        """
+        btn_style_daily = """
+            QPushButton {
+                color: white; border: none; border-radius: 14px; padding: 13px 10px;
+                font-family: 'Segoe UI'; font-size: 14px; font-weight: bold;
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
+                    stop:0 #059669, stop:1 #047857);
+                border-bottom: 3px solid #065f46;
+            }
+            QPushButton:hover { background: #34d399; }
+            QPushButton:pressed { margin-top: 2px; }
+        """
+
+        btn_regular = QPushButton("🎮  Regular Game")
+        btn_regular.setStyleSheet(btn_style_regular)
+        btn_regular.setCursor(self.custom_cursor)
+        btn_regular.clicked.connect(lambda: [dlg.accept(), self._load_cb and self._load_cb()])
+        vl.addWidget(btn_regular)
+
+        btn_daily = QPushButton("📅  Daily Challenge")
+        btn_daily.setStyleSheet(btn_style_daily)
+        btn_daily.setCursor(self.custom_cursor)
+        btn_daily.clicked.connect(lambda: [dlg.accept(), self._continue_daily_cb and self._continue_daily_cb()])
+        vl.addWidget(btn_daily)
+
+        dlg.exec()
 
     def setup_ui(self, start_cb, load_cb, quit_cb, music_cb, sfx_cb):
         layout = QVBoxLayout(self)
@@ -1698,7 +1780,7 @@ class WelcomeScreen(QWidget):
 
         # ── Primary action buttons ─────────────────────────────────────
         btn_start = _btn("🚀  NEW GAME",   "#f59e0b", "#d97706", "#b45309", start_cb)
-        btn_load  = _btn("💾  CONTINUE",   "#3b82f6", "#2563eb", "#1d4ed8", load_cb)
+        btn_load  = _btn("💾  CONTINUE",   "#3b82f6", "#2563eb", "#1d4ed8", self._show_continue_menu)
 
         # Daily Challenge — highlight if not yet played today
         daily_mgr = get_daily_manager()
@@ -1788,7 +1870,7 @@ class WelcomeScreen(QWidget):
         card_layout.addLayout(toggles_layout)
 
         # ── Version & shortcuts hint ───────────────────────────────────
-        ver = QLabel("v6.5.0 — Dynamic Edition  ·  ESC / P to pause")
+        ver = QLabel("v6.7.1 — Dynamic Edition  ·  ESC / P to pause")
         ver.setAlignment(Qt.AlignCenter)
         ver.setStyleSheet("color: rgba(255,255,255,0.45); font-size: 11px; "
                           "margin-top: 8px; background: transparent; border: none;")
@@ -1852,6 +1934,7 @@ class MainWindow(QMainWindow):
             music_on=self.music_enabled,
             sfx_on=self.sfx_enabled,
             colorblind_on=self.colorblind_enabled,
+            continue_daily_callback=self.continue_daily_challenge,
         )
         self.central_stack.addWidget(self.welcome_screen)
         
@@ -2673,17 +2756,17 @@ class MainWindow(QMainWindow):
         self.save_high_score_data()
         self._save_replay_after_session()
 
-        leaderboard = get_leaderboard(self.save_dir)
         stats = self.scene.score_mgr.get_stats()
         playtime = self.scene.game_timer.elapsed
-        leaderboard.add_entry(
-            score=stats['score'],
-            level=self.scene.level,
-            name="PLAYER",
-            total_shots=stats['total_shots'],
-            best_combo=stats['best_combo'],
-            playtime_sec=playtime,
-        )
+
+        # Store stats for leaderboard entry (name filled in by dialog)
+        self._pending_lb_stats = {
+            'score':       stats['score'],
+            'level':       self.scene.level,
+            'total_shots': stats['total_shots'],
+            'best_combo':  stats['best_combo'],
+            'playtime_sec': playtime,
+        }
 
         full_stats = {
             'score':       stats['score'],
@@ -2701,8 +2784,25 @@ class MainWindow(QMainWindow):
             on_continue=self.continue_from_save,
             on_new_game=self.start_new_game_fresh,
             on_menu=self.back_to_menu,
+            on_name_entered=self._save_leaderboard_entry,
         )
         dlg.exec()
+
+    def _save_leaderboard_entry(self, name: str):
+        """Save leaderboard entry with the player's chosen name."""
+        s = getattr(self, '_pending_lb_stats', None)
+        if not s:
+            return
+        leaderboard = get_leaderboard(self.save_dir)
+        leaderboard.add_entry(
+            score=s['score'],
+            level=s['level'],
+            name=name or "PLAYER",
+            total_shots=s['total_shots'],
+            best_combo=s['best_combo'],
+            playtime_sec=s['playtime_sec'],
+        )
+        self._pending_lb_stats = None
 
     def continue_from_save(self):
         """Load game dari save terakhir dan lanjutkan"""
@@ -2803,6 +2903,44 @@ class MainWindow(QMainWindow):
 
         # Connect daily shot-cap signal
         daily_mgr.shots_remaining_changed.connect(self._on_daily_shots_changed)
+
+    def continue_daily_challenge(self):
+        """Resume today's daily challenge if it was already started."""
+        daily_mgr = get_daily_manager(self.save_dir)
+
+        # If today's challenge was completed, just show a message and start fresh
+        if daily_mgr.is_today_completed():
+            self.start_daily_challenge()
+            return
+
+        # If today's challenge was started (but not completed), resume it
+        if daily_mgr.is_today_played():
+            self.scene.reset_game()
+            self.scene.daily_mode  = True
+            self.scene.daily_shots = 0
+
+            try:
+                daily_grid = daily_mgr.start()
+                while len(daily_grid) < ROWS:
+                    daily_grid.append([None] * COLS)
+                self.scene.grid.grid = daily_grid
+                self.scene.create_bubbles_visuals()
+            except Exception as e:
+                print(f"Daily grid error: {e}")
+
+            if hasattr(self, 'drop_label'):
+                remaining = daily_mgr.shots_left
+                self.drop_label.setText(f"📅 SHOTS LEFT: {remaining}")
+
+            self.scene.timer.start()
+            self.scene.shot_timer.start(rush_mode=False)
+            self.scene.game_timer.start()
+            self.central_stack.setCurrentIndex(1)
+            QTimer.singleShot(50, self._position_hud)
+            daily_mgr.shots_remaining_changed.connect(self._on_daily_shots_changed)
+        else:
+            # No daily session started yet — start fresh
+            self.start_daily_challenge()
 
     def _on_daily_shots_changed(self, remaining: int):
         if hasattr(self, 'drop_label'):
