@@ -2,7 +2,7 @@
 
 # 🐯 Macan Bubble Shooter
 
-### Dynamic Edition — v6.5.0
+### Dynamic Edition — v6.7.1
 
 A professional, full-featured bubble shooter game with a jungle/tiger theme built using PySide6.  
 Features smooth animations, particle effects, a timer-driven scoring engine, 35 achievements,  
@@ -13,24 +13,11 @@ boss enemies, daily challenges, a replay system, and a fully immersive fullscree
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Version](https://img.shields.io/badge/Version-6.5.0-orange.svg)
 
-<img width="1365" height="767" alt="Screenshot 2026-03-18 200057" src="https://github.com/user-attachments/assets/59f6c7be-6be5-477f-8244-4d3316731da1" />
+<img width="1365" height="767" alt="image" src="https://github.com/user-attachments/assets/07ffad18-7222-4943-89b8-1c0a0b7f3248" />
+
 
 
 </div>
-
----
-
-## ✨ What's New in v6.5.0
-
-| Area | Highlight |
-|---|---|
-| 📅 **Daily Challenge** | Same deterministic grid for all players each day, 40-shot cap, shareable result |
-| 👑 **Boss Bubbles** | Multi-hit enemies with HP bars, pulsing glow, and destruction rewards |
-| 🧱 **Obstacle Bubbles** | Indestructible blockers that must be cleared by removing all neighbors |
-| ♿ **Color-blind Mode** | Shape symbols + Okabe-Ito high-contrast palette, live rebuild |
-| 🎬 **Replay System** | Frame-accurate recording, top-5 persistence, in-game browser |
-| ⌨️ **Keyboard Shortcuts** | `Esc` / `P` to pause and resume at any time |
-| 🖥 **Menu Redesign** | Leaderboard and Achievements accessible directly from main menu |
 
 ---
 
@@ -363,7 +350,8 @@ Place `cursor.png` (24×24 px recommended) in
 ---
 
 ## 📸 Screenshots
-<img width="1365" height="767" alt="Screenshot 2026-03-18 200057" src="https://github.com/user-attachments/assets/0632358f-ce1e-4b34-9d46-10e813e53f7c" />
+<img width="1365" height="767" alt="image" src="https://github.com/user-attachments/assets/e732a9c3-44f0-4230-96f6-28e501bbbaa0" />
+
 
 <img width="1362" height="767" alt="Screenshot 2026-03-18 200317" src="https://github.com/user-attachments/assets/ed8301dd-e142-4ed7-a30a-b8a0341e95a7" />
 
