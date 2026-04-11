@@ -10,7 +10,7 @@ Modul ini berisi:
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QScrollArea, QWidget, QGridLayout, QProgressBar,
-    QGraphicsDropShadowEffect, QTabWidget
+    QGraphicsDropShadowEffect, QTabWidget, QLineEdit
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QLinearGradient, QBrush, QPalette, QPainter, QFont, QPixmap
@@ -434,19 +434,49 @@ class GameOverDialog(QDialog):
     action_menu = None
 
     def __init__(self, parent=None, stats: dict = None, on_continue=None,
-                 on_new_game=None, on_menu=None):
+                 on_new_game=None, on_menu=None, on_name_entered=None):
         super().__init__(parent)
         self.setWindowTitle("Game Over")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(480, 560)
+        self.setFixedSize(480, 620)
 
         self.stats = stats or {}
         self._on_continue = on_continue
         self._on_new_game = on_new_game
         self._on_menu = on_menu
+        self._on_name_entered = on_name_entered  # callback(name: str)
 
         self._setup_ui()
+
+    def _get_player_name(self) -> str:
+        """Return trimmed name or fallback to PLAYER."""
+        name = self.name_input.text().strip()
+        return name[:16] if name else "PLAYER"
+
+    def _handle_continue(self):
+        name = self._get_player_name()
+        if self._on_name_entered:
+            self._on_name_entered(name)
+        self.accept()
+        if self._on_continue:
+            self._on_continue()
+
+    def _handle_new_game(self):
+        name = self._get_player_name()
+        if self._on_name_entered:
+            self._on_name_entered(name)
+        self.accept()
+        if self._on_new_game:
+            self._on_new_game()
+
+    def _handle_menu(self):
+        name = self._get_player_name()
+        if self._on_name_entered:
+            self._on_name_entered(name)
+        self.accept()
+        if self._on_menu:
+            self._on_menu()
 
     def _setup_ui(self):
         outer = QVBoxLayout(self)
@@ -509,7 +539,7 @@ class GameOverDialog(QDialog):
         sb_layout.addWidget(best_lbl)
 
         layout.addWidget(score_box)
-        layout.addSpacing(12)
+        layout.addSpacing(10)
 
         # ── Stats Grid ──
         stats_grid = QGridLayout()
@@ -529,7 +559,50 @@ class GameOverDialog(QDialog):
             stats_grid.addWidget(mini, row_i, col_i)
 
         layout.addLayout(stats_grid)
-        layout.addSpacing(16)
+        layout.addSpacing(12)
+
+        # ── Name Input for Leaderboard ──
+        name_frame = QFrame()
+        name_frame.setStyleSheet(f"""
+            QFrame {{
+                background: rgba(255,215,0,0.06);
+                border: 1px solid rgba(255,215,0,0.25);
+                border-radius: 12px;
+            }}
+        """)
+        name_layout = QVBoxLayout(name_frame)
+        name_layout.setContentsMargins(16, 10, 16, 10)
+        name_layout.setSpacing(6)
+
+        name_hint = QLabel("🏆  Enter your name for the leaderboard:")
+        name_hint.setAlignment(Qt.AlignCenter)
+        name_hint.setStyleSheet(f"color: {GOLD}; font-size: 12px; font-weight: bold; border: none; background: transparent;")
+        name_layout.addWidget(name_hint)
+
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("PLAYER")
+        self.name_input.setMaxLength(16)
+        self.name_input.setAlignment(Qt.AlignCenter)
+        self.name_input.setStyleSheet(f"""
+            QLineEdit {{
+                background: rgba(255,255,255,0.08);
+                border: 1px solid rgba(255,255,255,0.25);
+                border-radius: 8px;
+                color: white;
+                font-size: 15px;
+                font-weight: bold;
+                font-family: 'Segoe UI';
+                padding: 6px 12px;
+                selection-background-color: {BLUE};
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {GOLD};
+            }}
+        """)
+        name_layout.addWidget(self.name_input)
+        layout.addWidget(name_frame)
+
+        layout.addSpacing(8)
 
         # ── Achievement unlock count ──
         ach_mgr = get_achievement_manager()
@@ -553,7 +626,7 @@ class GameOverDialog(QDialog):
             }}
             QPushButton:hover {{ background: #34d399; }}
         """)
-        continue_btn.clicked.connect(lambda: [self.accept(), self._on_continue and self._on_continue()])
+        continue_btn.clicked.connect(self._handle_continue)
 
         new_btn = QPushButton("🆕 NEW GAME")
         new_btn.setStyleSheet(BTN_BASE + f"""
@@ -563,7 +636,7 @@ class GameOverDialog(QDialog):
             }}
             QPushButton:hover {{ background: #f87171; }}
         """)
-        new_btn.clicked.connect(lambda: [self.accept(), self._on_new_game and self._on_new_game()])
+        new_btn.clicked.connect(self._handle_new_game)
 
         menu_btn = QPushButton("🏠 MENU")
         menu_btn.setStyleSheet(BTN_BASE + f"""
@@ -574,7 +647,7 @@ class GameOverDialog(QDialog):
             }}
             QPushButton:hover {{ background: #334155; }}
         """)
-        menu_btn.clicked.connect(lambda: [self.accept(), self._on_menu and self._on_menu()])
+        menu_btn.clicked.connect(self._handle_menu)
 
         for btn in [continue_btn, new_btn, menu_btn]:
             btn_layout.addWidget(btn)
