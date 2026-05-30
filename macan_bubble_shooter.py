@@ -462,8 +462,8 @@ class DangerZoneOverlay:
 
 
 class GameScene(QGraphicsScene):
-    score_changed = Signal(int)
-    high_score_changed = Signal(int)
+    score_changed = Signal(object)       # FIX: use object to avoid 32-bit int overflow
+    high_score_changed = Signal(object)  # FIX: use object to avoid 32-bit int overflow
     drop_counter_changed = Signal(int)
     level_changed = Signal(int)
     next_bubble_changed = Signal(int)
@@ -1870,7 +1870,7 @@ class WelcomeScreen(QWidget):
         card_layout.addLayout(toggles_layout)
 
         # ── Version & shortcuts hint ───────────────────────────────────
-        ver = QLabel("v6.7.1 — Dynamic Edition  ·  ESC / P to pause")
+        ver = QLabel("v6.7.2 — Dynamic Edition  ·  ESC / P to pause")
         ver.setAlignment(Qt.AlignCenter)
         ver.setStyleSheet("color: rgba(255,255,255,0.45); font-size: 11px; "
                           "margin-top: 8px; background: transparent; border: none;")
