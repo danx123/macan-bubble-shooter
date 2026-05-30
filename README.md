@@ -351,7 +351,8 @@ Place `cursor.png` (24×24 px recommended) in
 ---
 
 ## 📸 Screenshots
-<img width="1365" height="767" alt="image" src="https://github.com/user-attachments/assets/e732a9c3-44f0-4230-96f6-28e501bbbaa0" />
+<img width="1365" height="767" alt="Screenshot 2026-05-30 111235" src="https://github.com/user-attachments/assets/5dfa7c16-6d1d-4932-92df-c988ce9cd935" />
+
 
 
 <img width="1362" height="767" alt="Screenshot 2026-03-18 200317" src="https://github.com/user-attachments/assets/ed8301dd-e142-4ed7-a30a-b8a0341e95a7" />
