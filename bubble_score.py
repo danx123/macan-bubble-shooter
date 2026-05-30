@@ -79,11 +79,11 @@ class ScoreManager(QObject):
     - High score & leaderboard
     """
 
-    score_updated    = Signal(int)          # Total score saat ini
+    score_updated    = Signal(object)       # FIX: object to avoid 32-bit int overflow
     combo_updated    = Signal(int)          # Combo count terbaru
     streak_updated   = Signal(int)          # Streak count
     score_event      = Signal(object)       # ScoreEvent untuk popup
-    highscore_beaten = Signal(int)          # Saat high score dipecahkan
+    highscore_beaten = Signal(object)       # FIX: object to avoid 32-bit int overflow
 
     def __init__(self, save_dir: Path):
         super().__init__()
