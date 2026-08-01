@@ -8,7 +8,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QPushButton, 
                                QLabel, QVBoxLayout, QHBoxLayout, QGraphicsView, 
                                QGraphicsScene, QGraphicsEllipseItem, QGraphicsPolygonItem,
-                               QGraphicsRectItem, QDialog, QGraphicsDropShadowEffect, QStackedWidget, QCheckBox, QFrame, QGridLayout, QGraphicsTextItem, QGraphicsLineItem)
+                               QGraphicsRectItem, QDialog, QGraphicsDropShadowEffect, QStackedWidget, QCheckBox, QFrame, QGridLayout, QGraphicsTextItem, QGraphicsLineItem, QGraphicsPathItem)
 from PySide6.QtCore import (Qt, QTimer, QPointF, QRectF, QPropertyAnimation, 
                             Signal, QObject, QEasingCurve, QVariantAnimation)
 from PySide6.QtGui import (QColor, QPen, QBrush, QLinearGradient, QRadialGradient, 
@@ -527,9 +527,8 @@ class GameScene(QGraphicsScene):
         self.active_power = None
         self.freeze_shots_remaining = 0
         
-        # === AIM LINE (Garis Aim) ===
-        self.aim_line = None
-        self.aim_bounce_line = None
+        # === AIM LINE (Garis Aim) — OPTIMIZED: single QGraphicsPathItem ===
+        self.aim_line_item = None
 
         # === SISTEM BARU: Timer, Score, Achievement ===
         self._save_dir = Path.home() / "AppData" / "Local" / "MacanBubbleShooter6" / "saves"
@@ -740,25 +739,25 @@ class GameScene(QGraphicsScene):
         
         # 2. Logika Bubble Terbang
         if self.flying_bubble:
-            # === START: EFEK METEOR (TRAIL) ===
-            # Membuat partikel jejak di setiap frame
-            # Warna putih transparan (seperti asap/ekor komet)
-            trail_color = QColor(255, 255, 255, 150) 
-            
-            # Spawn partikel di posisi bubble saat ini
-            p = Particle(self.flying_bubble.x(), self.flying_bubble.y(), trail_color, self)
-            
-            # Kustomisasi partikel agar terlihat seperti jejak
-            p.setZValue(self.flying_bubble.zValue() - 1)  # Render di belakang bubble
-            p.setScale(0.5)        # Ukuran lebih kecil dari ledakan biasa
-            p.life = 10            # Umur sangat pendek (cepat hilang)
-            p.max_life = 10
-            
-            # Gerakan acak sangat kecil agar terlihat seperti asap buangan
-            p.vx = random.uniform(-1.5, 1.5)
-            p.vy = random.uniform(-1.5, 1.5)
-            
-            self.particles.append(p)
+            # === START: EFEK METEOR (TRAIL) — OPTIMIZED ===
+            # Spawn tiap 2 frame (bukan tiap frame) agar jumlah item scene
+            # tidak menumpuk terlalu banyak saat bubble melayang lama.
+            self._trail_frame_counter = getattr(self, '_trail_frame_counter', 0) + 1
+            if self._trail_frame_counter % 2 == 0:
+                trail_color = QColor(255, 255, 255, 150)
+
+                p = Particle(self.flying_bubble.x(), self.flying_bubble.y(), trail_color, self)
+
+                p.setZValue(self.flying_bubble.zValue() - 1)  # Render di belakang bubble
+                p.setScale(0.5)        # Ukuran lebih kecil dari ledakan biasa
+                p.life = 10            # Umur sangat pendek (cepat hilang)
+                p.max_life = 10
+
+                # Gerakan acak sangat kecil agar terlihat seperti asap buangan
+                p.vx = random.uniform(-1.5, 1.5)
+                p.vy = random.uniform(-1.5, 1.5)
+
+                self.particles.append(p)
             # === END: EFEK METEOR ===
 
             # 3. Hitung posisi baru
@@ -899,16 +898,6 @@ class GameScene(QGraphicsScene):
                 QTimer.singleShot(100, self.add_ceiling_row)
                 self.shots_until_drop = SHOTS_PER_DROP
                 self.drop_counter_changed.emit(self.shots_until_drop)       
-        
-        match_found = self.check_matches(best_row, best_col)
-        
-        if not match_found:
-            self.check_and_drop_neighbors(best_row, best_col)
-        
-        if self.shots_until_drop <= 0:
-            QTimer.singleShot(100, self.add_ceiling_row)
-            self.shots_until_drop = SHOTS_PER_DROP
-            self.drop_counter_changed.emit(self.shots_until_drop)
 
         if self.check_game_over_condition():
             self.game_over.emit()
@@ -1072,21 +1061,53 @@ class GameScene(QGraphicsScene):
         self.removeItem(boss)
         if boss in self.boss_bubbles:
             self.boss_bubbles.remove(boss)
-        # Also remove from grid if tracked
+        # Bersihkan slot grid yang direservasi boss ini (kalau ada)
+        r, c = getattr(boss, 'row', -1), getattr(boss, 'col', -1)
+        if 0 <= r < len(self.grid.grid) and 0 <= c < len(self.grid.grid[r]):
+            if self.grid.grid[r][c] == -3:
+                self.grid.grid[r][c] = None
+
+    def _find_nearest_empty_cell(self, x: float, y: float):
+        """Cari cell grid kosong terdekat dari koordinat (x, y). Dipakai untuk
+        mereservasi slot boss bubble agar tidak overlap dengan bubble biasa."""
+        min_dist = float('inf')
+        best_row, best_col = None, None
         for row in range(len(self.grid.grid)):
             for col in range(len(self.grid.grid[row])):
-                if self.grid.grid[row][col] == -3:   # boss sentinel
+                if self.grid.grid[row][col] is None:
                     gx, gy = self.grid.get_position(row, col)
-                    if abs(gx - boss.x()) < 5 and abs(gy - boss.y()) < 5:
-                        self.grid.grid[row][col] = None
+                    dx = x - gx
+                    dy = y - gy
+                    dist = dx * dx + dy * dy
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_row, best_col = row, col
+        return best_row, best_col
 
     def try_spawn_boss_after_match(self, match_size: int, x: float, y: float):
-        """Possibly spawn a boss bubble near the match site after a big match."""
+        """Possibly spawn a boss bubble near the match site after a big match.
+        FIXED: boss sekarang mereservasi slot di grid (sentinel -3) supaya
+        bubble baru tidak bisa menempati/overlap posisi yang sama, dan
+        cleanup-nya bisa membersihkan grid dengan benar saat boss mati."""
         if should_spawn_boss(self.level, match_size):
             color = random.randint(0, len(BUBBLE_PALETTE) - 1)
-            boss  = create_boss_bubble(color, x + random.randint(-40, 40),
-                                       max(BUBBLE_RADIUS * 2, y - BUBBLE_RADIUS * 3),
-                                       self.level)
+            spawn_x = x + random.randint(-40, 40)
+            spawn_y = max(BUBBLE_RADIUS * 2, y - BUBBLE_RADIUS * 3)
+
+            row, col = self._find_nearest_empty_cell(spawn_x, spawn_y)
+
+            if row is not None:
+                gx, gy = self.grid.get_position(row, col)
+                boss = create_boss_bubble(color, gx, gy, self.level)
+                boss.row = row
+                boss.col = col
+                self.grid.grid[row][col] = -3  # reservasi slot: boss sentinel
+            else:
+                # Fallback: tidak ada slot kosong, tetap spawn mengambang saja
+                boss = create_boss_bubble(color, spawn_x, spawn_y, self.level)
+                boss.row = -1
+                boss.col = -1
+
             boss.destroyed.connect(lambda b: self._on_boss_destroyed(b))
             self.addItem(boss)
             self.boss_bubbles.append(boss)
@@ -1251,28 +1272,30 @@ class GameScene(QGraphicsScene):
         self.score_changed.emit(self.score_mgr.score)
     
     def check_and_drop_neighbors(self, impact_row, impact_col):
+        """OPTIMIZED: flood-fill konektivitas ke langit-langit dihitung SEKALI
+        di luar loop neighbor, bukan diulang tiap neighbor (bisa sampai 6x
+        flood-fill full-grid sebelumnya)."""
         neighbors = self.grid.get_neighbors(impact_row, impact_col)
         total_dropped = 0
         last_x, last_y = self.grid.get_position(impact_row, impact_col)
 
+        connected = set()
+        for col in range(len(self.grid.grid[0])):
+            if self.grid.grid[0][col] is not None:
+                self.find_connected(0, col, connected)
+
         for nr, nc in neighbors:
-            if self.grid.grid[nr][nc] is not None:
-                connected = set()
-                for col in range(len(self.grid.grid[0])):
-                    if self.grid.grid[0][col] is not None:
-                        self.find_connected(0, col, connected)
+            if self.grid.grid[nr][nc] is not None and (nr, nc) not in connected:
+                to_drop = set()
+                self.find_connected_cluster(nr, nc, to_drop)
 
-                if (nr, nc) not in connected:
-                    to_drop = set()
-                    self.find_connected_cluster(nr, nc, to_drop)
-
-                    for dr, dc in to_drop:
-                        if self.grid.grid[dr][dc] is not None:
-                            gx, gy = self.grid.get_position(dr, dc)
-                            last_x, last_y = gx, gy
-                            self.grid.grid[dr][dc] = None
-                            self.remove_bubble_visual(dr, dc)
-                            total_dropped += 1
+                for dr, dc in to_drop:
+                    if self.grid.grid[dr][dc] is not None:
+                        gx, gy = self.grid.get_position(dr, dc)
+                        last_x, last_y = gx, gy
+                        self.grid.grid[dr][dc] = None
+                        self.remove_bubble_visual(dr, dc)
+                        total_dropped += 1
 
         # Satu popup drop di akhir, bukan per-bubble
         if total_dropped > 0:
@@ -1399,10 +1422,11 @@ class GameScene(QGraphicsScene):
         self.daily_mode  = False
         self.daily_shots = 0
     def update_aim_line(self, angle):
-        """Update garis aim dengan pantulan - presisi di kedua dinding"""
-        self.clear_aim_line()
-        
+        """Update garis aim dengan pantulan - presisi di kedua dinding
+        OPTIMIZED: pakai satu QGraphicsPathItem yang di-reuse, bukan puluhan
+        QGraphicsLineItem yang di-add/remove tiap kali mouse gerak."""
         if self.shooting or self.flying_bubble:
+            self.clear_aim_line()
             return
         
         rad = math.radians(angle)
@@ -1455,23 +1479,26 @@ class GameScene(QGraphicsScene):
             current_x, current_y = next_x, next_y
         
         if len(points) >= 2:
-            pen = QPen(QColor(255, 255, 255, 150), 3, Qt.DotLine)
-            
-            self.aim_line = []
-            for i in range(len(points) - 1):
-                line = QGraphicsLineItem(points[i][0], points[i][1], 
-                                        points[i+1][0], points[i+1][1])
-                line.setPen(pen)
-                line.setZValue(50)
-                self.addItem(line)
-                self.aim_line.append(line)
+            path = QPainterPath()
+            path.moveTo(points[0][0], points[0][1])
+            for px, py in points[1:]:
+                path.lineTo(px, py)
+
+            if self.aim_line_item is None:
+                self.aim_line_item = QGraphicsPathItem()
+                self.aim_line_item.setPen(QPen(QColor(255, 255, 255, 150), 3, Qt.DotLine))
+                self.aim_line_item.setZValue(50)
+                self.addItem(self.aim_line_item)
+
+            self.aim_line_item.setPath(path)
+            self.aim_line_item.setVisible(True)
+        else:
+            self.clear_aim_line()
     
     def clear_aim_line(self):
-        """Hapus garis aim"""
-        if self.aim_line:
-            for line in self.aim_line:
-                self.removeItem(line)
-            self.aim_line = None
+        """Sembunyikan garis aim (item tetap ada di scene, tinggal di-reuse)"""
+        if self.aim_line_item is not None:
+            self.aim_line_item.setVisible(False)
 
 class GameView(QGraphicsView):
     def __init__(self, scene):
@@ -1510,7 +1537,7 @@ class GameView(QGraphicsView):
             self.scene_ref.update_aim_line(self._pending_angle)
             
     def mouseMoveEvent(self, event):
-        pos = self.mapToScene(event.pos())
+        pos = self.mapToScene(event.position().toPoint())
         shooter_pos = self.scene_ref.shooter.pos()
         dx = pos.x() - shooter_pos.x()
         dy = shooter_pos.y() - pos.y()
@@ -1870,7 +1897,7 @@ class WelcomeScreen(QWidget):
         card_layout.addLayout(toggles_layout)
 
         # ── Version & shortcuts hint ───────────────────────────────────
-        ver = QLabel("v6.7.2 — Dynamic Edition  ·  ESC / P to pause")
+        ver = QLabel("v6.7.5 — Dynamic Edition  ·  ESC / P to pause")
         ver.setAlignment(Qt.AlignCenter)
         ver.setStyleSheet("color: rgba(255,255,255,0.45); font-size: 11px; "
                           "margin-top: 8px; background: transparent; border: none;")
