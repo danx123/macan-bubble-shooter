@@ -1514,6 +1514,11 @@ class GameView(QGraphicsView):
             # Opsional: Bisa di-darken sedikit biar bubble terlihat jelas
             self.bg_pixmap = original_pix
         # ----------------------------
+        
+        # === FIX FULLSCREEN ===
+        self.setFrameShape(QFrame.NoFrame)
+        self.setStyleSheet("border: none; background: transparent; outline: none;")
+        # ==========================
 
         self.setRenderHint(QPainter.Antialiasing)
         self.setRenderHint(QPainter.SmoothPixmapTransform)
@@ -1897,7 +1902,7 @@ class WelcomeScreen(QWidget):
         card_layout.addLayout(toggles_layout)
 
         # ── Version & shortcuts hint ───────────────────────────────────
-        ver = QLabel("v6.7.5 — Dynamic Edition  ·  ESC / P to pause")
+        ver = QLabel("v6.7.6 — Dynamic Edition  ·  ESC / P to pause")
         ver.setAlignment(Qt.AlignCenter)
         ver.setStyleSheet("color: rgba(255,255,255,0.45); font-size: 11px; "
                           "margin-top: 8px; background: transparent; border: none;")
@@ -1909,6 +1914,12 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Macan Bubble Shooter - Dynamic Edition")
+        
+        # Menghapus border window dari Sistem Operasi & mereset margin
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        self.setContentsMargins(0, 0, 0, 0)
+        # ==========================
+        
         icon_path = "marble.ico"
         if hasattr(sys, "_MEIPASS"):
             icon_path = os.path.join(sys._MEIPASS, icon_path)
@@ -1946,6 +1957,10 @@ class MainWindow(QMainWindow):
         # --- SETUP STACKED WIDGET ---
         self.central_stack = QStackedWidget()
         self.setCentralWidget(self.central_stack)
+        
+        # === FIX FULLSCREEN ===
+        self.central_stack.setContentsMargins(0, 0, 0, 0) # Hilangkan margin bawaan stack
+        # ==========================
 
         # 3. Setup Welcome Screen (Index 0)
         self.welcome_screen = WelcomeScreen(
