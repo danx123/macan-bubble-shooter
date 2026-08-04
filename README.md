@@ -13,7 +13,8 @@ boss enemies, daily challenges, a replay system, and a fully immersive fullscree
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Version](https://img.shields.io/badge/Version-6.7.6-orange.svg)
 
-<img width="1365" height="767" alt="Screenshot 2026-08-01 174217" src="https://github.com/user-attachments/assets/057a7f61-99ef-452d-a825-3f6f5d81bfb5" />
+
+<img width="1365" height="767" alt="Screenshot 2026-08-04 170610" src="https://github.com/user-attachments/assets/f28ed233-cd59-4974-a507-e452b3b9a08d" />
 
 
 
@@ -352,7 +353,8 @@ Place `cursor.png` (24×24 px recommended) in
 ---
 
 ## 📸 Screenshots
-<img width="1365" height="767" alt="Screenshot 2026-08-01 174217" src="https://github.com/user-attachments/assets/ad56d8e0-f1dd-4cf6-9a81-73df01983958" />
+<img width="1365" height="767" alt="Screenshot 2026-08-04 170610" src="https://github.com/user-attachments/assets/2625c13a-6f58-41ca-9e34-173fc273bd41" />
+
 
 
 
