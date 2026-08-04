@@ -2,7 +2,7 @@
 
 # 🐯 Macan Bubble Shooter
 
-### Dynamic Edition — v6.7.5
+### Dynamic Edition — v6.7.6
 
 A professional, full-featured bubble shooter game with a jungle/tiger theme built using PySide6.  
 Features smooth animations, particle effects, a timer-driven scoring engine, 35 achievements,  
@@ -11,7 +11,7 @@ boss enemies, daily challenges, a replay system, and a fully immersive fullscree
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
 ![PySide6](https://img.shields.io/badge/PySide6-6.0+-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
-![Version](https://img.shields.io/badge/Version-6.7.5-orange.svg)
+![Version](https://img.shields.io/badge/Version-6.7.6-orange.svg)
 
 <img width="1365" height="767" alt="Screenshot 2026-08-01 174217" src="https://github.com/user-attachments/assets/057a7f61-99ef-452d-a825-3f6f5d81bfb5" />
 
