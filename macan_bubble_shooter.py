@@ -46,6 +46,16 @@ from bubble_special import (
 )
 from bubble_daily import get_daily_manager, DAILY_SHOTS_CAP
 
+# === RUST ENGINE (bubble_engine) — flood-fill matching/konektivitas ===
+# Fallback ke implementasi Python murni kalau wheel belum ter-build/terpasang
+# di mesin ini (mis. dev tanpa toolchain Rust), biar app tetap jalan.
+try:
+    import bubble_engine as _rust_engine
+    RUST_ENGINE_AVAILABLE = True
+except ImportError:
+    _rust_engine = None
+    RUST_ENGINE_AVAILABLE = False
+
 # --- Game Configuration ---
 BUBBLE_RADIUS = 22
 ROWS = 14
@@ -1114,8 +1124,7 @@ class GameScene(QGraphicsScene):
 
     def check_matches(self, row, col):
         color = self.grid.grid[row][col]
-        matched = set()
-        self.find_matching(row, col, color, matched)
+        matched = self._find_matching_set(row, col, color)
 
         if len(matched) >= 3:
             play_clear()
@@ -1225,6 +1234,8 @@ class GameScene(QGraphicsScene):
             self.update_background_color()
 
     def find_matching(self, row, col, color, matched):
+        """Rekursif Python (fallback). Dipakai kalau bubble_engine (Rust) gak tersedia.
+        Untuk jalur normal, lihat check_matches() yang manggil _find_matching_set()."""
         if (row, col) in matched: 
             return
         
@@ -1239,8 +1250,51 @@ class GameScene(QGraphicsScene):
             search_color = color if color != -1 else cell_color
             for nr, nc in self.grid.get_neighbors(row, col):
                 self.find_matching(nr, nc, search_color, matched)
-            
+
+    def _find_matching_set(self, row, col, color):
+        """Cari semua bubble yang match warnanya dari (row,col). Pakai Rust
+        (BFS, gak ada limit recursion) kalau ada, else fallback ke rekursif Python."""
+        if RUST_ENGINE_AVAILABLE:
+            return set(_rust_engine.find_matching(self.grid.grid, row, col))
+        matched = set()
+        self.find_matching(row, col, color, matched)
+        return matched
+
+    def _find_connected_cluster_set(self, row, col):
+        """Cari cluster bubble terisi yang terhubung dari (row,col), gak peduli
+        warna. Pakai Rust kalau ada, else fallback ke rekursif Python."""
+        if RUST_ENGINE_AVAILABLE:
+            return set(_rust_engine.find_connected_cluster(self.grid.grid, row, col))
+        cluster = set()
+        self.find_connected_cluster(row, col, cluster)
+        return cluster
+
     def remove_floating_bubbles(self):
+        if RUST_ENGINE_AVAILABLE:
+            floating_positions = set(_rust_engine.find_floating_bubbles(self.grid.grid))
+            dropped_count = 0
+            popup_x = self.grid_offset_x + (COLS * BUBBLE_RADIUS * 2) / 2
+            popup_y = self.scene_height * 0.35
+
+            for row, col in floating_positions:
+                self.grid.grid[row][col] = None
+                self.remove_bubble_visual(row, col)
+                dropped_count += 1
+
+            if dropped_count > 0:
+                self.score_mgr.on_drops(dropped_count, popup_x, popup_y)
+                self.ach_mgr.on_drop(self.score_mgr._total_drops)
+
+            if dropped_count >= 3:
+                play_combo()
+                self._chain_count += 1
+                self.ach_mgr.on_chain_reaction(self._chain_count)
+            else:
+                self._chain_count = 0
+
+            self.score_changed.emit(self.score_mgr.score)
+            return
+
         connected = set()
         for col in range(len(self.grid.grid[0])):
             if self.grid.grid[0][col] is not None:
@@ -1279,15 +1333,19 @@ class GameScene(QGraphicsScene):
         total_dropped = 0
         last_x, last_y = self.grid.get_position(impact_row, impact_col)
 
-        connected = set()
-        for col in range(len(self.grid.grid[0])):
-            if self.grid.grid[0][col] is not None:
-                self.find_connected(0, col, connected)
+        if RUST_ENGINE_AVAILABLE:
+            floating = set(_rust_engine.find_floating_bubbles(self.grid.grid))
+            not_connected = lambda pos: pos in floating
+        else:
+            connected = set()
+            for col in range(len(self.grid.grid[0])):
+                if self.grid.grid[0][col] is not None:
+                    self.find_connected(0, col, connected)
+            not_connected = lambda pos: pos not in connected
 
         for nr, nc in neighbors:
-            if self.grid.grid[nr][nc] is not None and (nr, nc) not in connected:
-                to_drop = set()
-                self.find_connected_cluster(nr, nc, to_drop)
+            if self.grid.grid[nr][nc] is not None and not_connected((nr, nc)):
+                to_drop = self._find_connected_cluster_set(nr, nc)
 
                 for dr, dc in to_drop:
                     if self.grid.grid[dr][dc] is not None:
@@ -1902,7 +1960,7 @@ class WelcomeScreen(QWidget):
         card_layout.addLayout(toggles_layout)
 
         # ── Version & shortcuts hint ───────────────────────────────────
-        ver = QLabel("v6.7.6 — Dynamic Edition  ·  ESC / P to pause")
+        ver = QLabel("v6.8.0 — Dynamic Edition  ·  ESC / P to pause")
         ver.setAlignment(Qt.AlignCenter)
         ver.setStyleSheet("color: rgba(255,255,255,0.45); font-size: 11px; "
                           "margin-top: 8px; background: transparent; border: none;")
