@@ -2,7 +2,7 @@
 
 # 🐯 Macan Bubble Shooter
 
-### Dynamic Edition — v6.8.0
+### Dynamic Edition — v6.9.0
 
 A professional, full-featured bubble shooter game with a jungle/tiger theme built using PySide6.  
 Features smooth animations, particle effects, a timer-driven scoring engine, 35 achievements,  
@@ -11,10 +11,11 @@ boss enemies, daily challenges, a replay system, and a fully immersive fullscree
 ![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
 ![PySide6](https://img.shields.io/badge/PySide6-6.0+-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
-![Version](https://img.shields.io/badge/Version-6.8.0-orange.svg)
+![Version](https://img.shields.io/badge/Version-6.9.0-orange.svg)
 
 
-<img width="1365" height="767" alt="image" src="https://github.com/user-attachments/assets/1750f972-36ca-4922-a0f6-181f9fad1415" />
+<img width="1365" height="767" alt="Screenshot 2026-08-20 010205" src="https://github.com/user-attachments/assets/3bf79384-0dff-4bda-b079-6714fba1e61b" />
+
 
 
 
@@ -354,7 +355,8 @@ Place `cursor.png` (24×24 px recommended) in
 ---
 
 ## 📸 Screenshots
-<img width="1365" height="767" alt="image" src="https://github.com/user-attachments/assets/4fb65dc7-d060-4ae6-bebf-18f43cd162a9" />
+<img width="1365" height="767" alt="Screenshot 2026-08-20 010205" src="https://github.com/user-attachments/assets/19ae877f-6987-4245-96e8-a35956317472" />
+
 
 
 <img width="1362" height="767" alt="Screenshot 2026-03-18 200317" src="https://github.com/user-attachments/assets/ed8301dd-e142-4ed7-a30a-b8a0341e95a7" />
