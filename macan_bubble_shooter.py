@@ -140,7 +140,11 @@ class Bubble(QObject, QGraphicsEllipseItem):
             rainbow_text.setPos(-text_rect.width()/2, -text_rect.height()/2)
             return
 
-        if self.color_index >= len(BUBBLE_PALETTE):
+        # FIXED: dulu cuma dicek `>=`, jadi index negatif selain -1 (mis. sentinel
+        # boss -3 / obstacle -2) ke-wrap oleh Python negative indexing dan malah
+        # nampilin warna asli (BUBBLE_PALETTE[-3] == index 3 == kuning!). Sekarang
+        # semua index di luar rentang warna valid (bukan -1/rainbow) di-fallback ke 0.
+        if self.color_index < 0 or self.color_index >= len(BUBBLE_PALETTE):
             self.color_index = 0
 
         palette = BUBBLE_PALETTE[self.color_index]
@@ -681,6 +685,19 @@ class GameScene(QGraphicsScene):
         self.bg_overlay.setBrush(QBrush(tint_color))
             
     def create_bubbles_visuals(self):
+        # FIXED: sel dengan nilai sentinel non-warna (mis. -3 = reservasi boss yang
+        # nyangkut dari save lama, -2 = obstacle) BUKAN warna bubble biasa dan gak
+        # boleh dirender pakai Bubble() — kalau kebablasan, sel ini dibersihin balik
+        # jadi None (self-healing) biar gak nyangkut selamanya sebagai "bubble hantu"
+        # yang keliatan berwarna tapi gak pernah bisa match.
+        for row in range(len(self.grid.grid)):
+            for col in range(len(self.grid.grid[row])):
+                v = self.grid.grid[row][col]
+                if v is not None and v != -1 and (v < 0 or v >= len(BUBBLE_PALETTE)):
+                    self.grid.grid[row][col] = None
+        self._create_bubbles_visuals_impl()
+
+    def _create_bubbles_visuals_impl(self):
         for bubble in self.bubbles:
             self.removeItem(bubble)
         self.bubbles.clear()
@@ -1960,7 +1977,7 @@ class WelcomeScreen(QWidget):
         card_layout.addLayout(toggles_layout)
 
         # ── Version & shortcuts hint ───────────────────────────────────
-        ver = QLabel("v6.8.0 — Dynamic Edition  ·  ESC / P to pause")
+        ver = QLabel("v6.9.1 — Dynamic Edition  ·  ESC / P to pause")
         ver.setAlignment(Qt.AlignCenter)
         ver.setStyleSheet("color: rgba(255,255,255,0.45); font-size: 11px; "
                           "margin-top: 8px; background: transparent; border: none;")
@@ -2776,12 +2793,22 @@ class MainWindow(QMainWindow):
         power_manager = get_power_manager()
         power_data = {p_type: p_obj.charges for p_type, p_obj in power_manager.powers.items()}
 
+        # FIXED: bersihin sentinel non-warna (mis. -3 reservasi boss, -2 obstacle)
+        # sebelum disave — boss/obstacle object-nya sendiri gak ikut disave, jadi
+        # kalau sentinel-nya ikut ke-save, pas di-load nanti jadi sel "hantu" yang
+        # gak pernah bisa match (lihat create_bubbles_visuals & setup_appearance).
+        clean_grid = [
+            [(v if (v is None or v == -1 or 0 <= v < len(BUBBLE_PALETTE)) else None)
+             for v in row]
+            for row in self.scene.grid.grid
+        ]
+
         save_data = {
             'score':            self.scene.score_mgr.score,
             'high_score':       self.scene.score_mgr.high_score,
             'level':            self.scene.level,
             'shots_until_drop': self.scene.shots_until_drop,
-            'grid':             self.scene.grid.grid,
+            'grid':             clean_grid,
             'shooter_current':  self.scene.shooter.current_color,
             'shooter_next':     self.scene.shooter.next_color,
             'powerups':         power_data,
