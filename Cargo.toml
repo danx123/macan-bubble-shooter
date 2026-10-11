@@ -1,0 +1,23 @@
+[package]
+name = "bubble_engine"
+version = "0.1.0"
+edition = "2021"
+description = "Bubble Match & Grid Engine — Cepat & Aman"
+
+[lib]
+name = "bubble_engine"
+crate-type = ["cdylib"]  # Library untuk Python
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py310"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+ahash = "0.8"  # HashMap lebih cepat
+chrono = { version = "0.4", default-features = false, features = ["clock"] }  # dipakai serialize_game_state (timestamp)
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
